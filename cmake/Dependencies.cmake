@@ -1310,24 +1310,22 @@ endif()
 
 # ---[ XPU
 if(USE_XPU)
-  include(${CMAKE_CURRENT_LIST_DIR}/public/LoadXPU.cmake)
+  include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
   if(PYTORCH_FOUND_XPU)
-    message(INFO "Compiling with XPU for Intel GPU.")
+    # # -- Host flags (XPU_CXX_FLAGS)
+    # list(APPEND XPU_CXX_FLAGS -fPIC)
+    # list(APPEND XPU_CXX_FLAGS -Wno-shift-count-negative)
+    # list(APPEND XPU_CXX_FLAGS -Wno-shift-count-overflow)
+    # list(APPEND XPU_CXX_FLAGS -Wno-duplicate-decl-specifier)
+    # list(APPEND XPU_CXX_FLAGS -std=c++17)
 
-    # -- Host flags (XPU_CXX_FLAGS)
-    list(APPEND XPU_CXX_FLAGS -fPIC)
-    list(APPEND XPU_CXX_FLAGS -Wno-shift-count-negative)
-    list(APPEND XPU_CXX_FLAGS -Wno-shift-count-overflow)
-    list(APPEND XPU_CXX_FLAGS -Wno-duplicate-decl-specifier)
-    list(APPEND XPU_CXX_FLAGS -std=c++17)
+    # if(CMAKE_BUILD_TYPE MATCHES Debug)
+    #    list(APPEND XPU_CXX_FLAGS -g2)
+    #    list(APPEND XPU_CXX_FLAGS -O0)
+    # endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
-    if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND XPU_CXX_FLAGS -g2)
-       list(APPEND XPU_CXX_FLAGS -O0)
-    endif(CMAKE_BUILD_TYPE MATCHES Debug)
-
-    # -- Kernel flags (SYCL_KERNEL_FLAGS)
-    # The fast-math will be enabled by default in IntelSYCL compiler.
+    # -- Kernel flags (SYCL_KERNEL_COMPILE_OPTIONS)
+    # The fast-math will be enabled by default in SYCL compiler.
     # Refer to [https://clang.llvm.org/docs/UsersManual.html#cmdoption-fno-fast-math]
     # 1. We enable below flags here to be warn about NaN and Infinity,
     # which will be hidden by fast-math by default.
@@ -1336,35 +1334,35 @@ if(USE_XPU)
     # 3. The approx-func allows certain math function calls (such as log, sqrt, pow, etc)
     # to be replaced with an approximately equivalent set of instructions or
     # alternative math function calls, which have great errors.
-    set(SYCL_KERNEL_FLAGS ${SYCL_KERNEL_FLAGS} -fhonor-nans)
-    set(SYCL_KERNEL_FLAGS ${SYCL_KERNEL_FLAGS} -fhonor-infinities)
-    set(SYCL_KERNEL_FLAGS ${SYCL_KERNEL_FLAGS} -fno-associative-math)
-    set(SYCL_KERNEL_FLAGS ${SYCL_KERNEL_FLAGS} -fno-approx-func)
+    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fhonor-nans)
+    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fhonor-infinities)
+    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fno-associative-math)
+    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fno-approx-func)
 
-    # -- Link flags (SYCL_KERNEL_LINK_FLAGS)
+    # -- Link flags
     include(ProcessorCount)
     ProcessorCount(proc_cnt)
     if ((DEFINED ENV{MAX_JOBS}) AND ("$ENV{MAX_JOBS}" LESS_EQUAL ${proc_cnt}))
-      set(IntelSYCL_MAX_PARALLEL_LINK_JOBS $ENV{MAX_JOBS})
+      set(SYCL_MAX_PARALLEL_LINK_JOBS $ENV{MAX_JOBS})
     else()
-      set(IntelSYCL_MAX_PARALLEL_LINK_JOBS ${proc_cnt})
+      set(SYCL_MAX_PARALLEL_LINK_JOBS ${proc_cnt})
     endif()
-    set(SYCL_KERNEL_LINK_OPTIONS ${SYCL_KERNEL_LINK_OPTIONS} -fsycl-max-parallel-link-jobs=${IntelSYCL_MAX_PARALLEL_LINK_JOBS})
+    set(SYCL_KERNEL_LINK_OPTIONS ${SYCL_KERNEL_LINK_OPTIONS} -fsycl-max-parallel-link-jobs=${SYCL_MAX_PARALLEL_LINK_JOBS})
     set(SYCL_KERNEL_LINK_OPTIONS ${SYCL_KERNEL_LINK_OPTIONS} -fsycl-targets=spir64_gen,spir64)
     set(SYCL_KERNEL_LINK_OPTIONS ${SYCL_KERNEL_LINK_OPTIONS} -flink-huge-device-code)
     # SYCL_FLAGS: `-fsycl`, a kernel building flag setup by Intel SYCL compiler cmake.
-    set(SYCL_KERNEL_FLAGS ${SYCL_FLAGS} ${SYCL_KERNEL_FLAGS} ${SYCL_KERNEL_LINK_OPTIONS})
+    set(SYCL_FLAGS ${SYCL_FLAGS} ${SYCL_KERNEL_COMPILE_OPTIONS} ${SYCL_KERNEL_LINK_OPTIONS})
 
-    # -- offline compiler flags (IntelSYCL_OFFLINE_FLAGS. SPIRV -> BIN)
+    # -- offline compiler flags (SYCL_OFFLINE_COMPILER_OPTIONS. SPIRV -> BIN)
     # offline compiler (Intel Graphics Compiler. IGC) of Intel SYCL compiler is to compile SPIRV and output kernel binary.
-    set(IntelSYCL_OFFLINE_ARCH "-device ${PYTORCH_XPU_ARCH}")
-    set(IntelSYCL_OFFLINE_OPTIONS "${IntelSYCL_OFFLINE_OPTIONS} -cl-intel-enable-auto-large-GRF-mode")
-    set(IntelSYCL_OFFLINE_OPTIONS "${IntelSYCL_OFFLINE_OPTIONS} -cl-poison-unsupported-fp64-kernels")
-    set(IntelSYCL_OFFLINE_OPTIONS "-options '${IntelSYCL_OFFLINE_OPTIONS}'")
-    set(IntelSYCL_OFFLINE_FLAGS -Xs ${IntelSYCL_OFFLINE_ARCH} ${IntelSYCL_OFFLINE_OPTIONS})
+    set(SYCL_ARCH_TARGET "-device ${PYTORCH_XPU_ARCH}")
+    set(SYCL_OFFLINE_COMPILER_OPTIONS "${SYCL_OFFLINE_COMPILER_OPTIONS} -cl-intel-enable-auto-large-GRF-mode")
+    set(SYCL_OFFLINE_COMPILER_OPTIONS "${SYCL_OFFLINE_COMPILER_OPTIONS} -cl-poison-unsupported-fp64-kernels")
+    set(SYCL_OFFLINE_COMPILER_OPTIONS "-options '${SYCL_OFFLINE_COMPILER_OPTIONS}'")
+    set(SYCL_OFFLINE_COMPILER_OPTIONS -Xs ${SYCL_ARCH_TARGET} ${SYCL_OFFLINE_COMPILER_OPTIONS})
 
-    # offline options (IntelSYCL_OFFLINE_OPTIONS) must be appended at the end of link flags
-    set(SYCL_KERNEL_LINK_FLAGS ${SYCL_FLAGS} ${SYCL_KERNEL_LINK_OPTIONS} ${IntelSYCL_OFFLINE_FLAGS})
+    # offline options (SYCL_OFFLINE_COMPILER_OPTIONS) must be appended at the end of link flags
+    set(SYCL_FLAGS ${SYCL_FLAGS} ${SYCL_OFFLINE_COMPILER_OPTIONS})
   endif()
 endif()
 

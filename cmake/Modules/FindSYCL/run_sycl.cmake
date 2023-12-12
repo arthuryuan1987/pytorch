@@ -42,96 +42,96 @@ endif()
 
 set(CMAKE_COMMAND "@CMAKE_COMMAND@") # path
 set(source_file "@source_file@") # path
-set(IntelSYCL_generated_dependency_file "@IntelSYCL_generated_dependency_file@") # path
+set(SYCL_generated_dependency_file "@SYCL_generated_dependency_file@") # path
 set(cmake_dependency_file "@cmake_dependency_file@") # path
-set(IntelSYCL_HOST_COMPILER "@IntelSYCL_HOST_COMPILER@") # path
+set(SYCL_HOST_COMPILER "@SYCL_HOST_COMPILER@") # path
 set(generated_file_path "@generated_file_path@") # path
 set(generated_file_internal "@generated_file@") # path
-set(IntelSYCL_executable "@IntelSYCL_EXECUTABLE@") # path
-set(IntelSYCL_flags @IntelSYCL_flags@) # list
+set(SYCL_executable "@SYCL_EXECUTABLE@") # path
+set(SYCL_flags @SYCL_flags@) # list
 
-list(REMOVE_DUPLICATES IntelSYCL_INCLUDE_DIRS)
-set(IntelSYCL_include_args)
-foreach(dir ${IntelSYCL_INCLUDE_DIRS})
+list(REMOVE_DUPLICATES SYCL_INCLUDE_DIRS)
+set(SYCL_include_args)
+foreach(dir ${SYCL_INCLUDE_DIRS})
   # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
-  list(APPEND IntelSYCL_include_args "-I${dir}")
+  list(APPEND SYCL_include_args "-I${dir}")
 endforeach()
 
-# Clean up list of compile definitions, add -D flags, and append to IntelSYCL_flags
-list(REMOVE_DUPLICATES IntelSYCL_COMPILE_DEFINITIONS)
-foreach(def ${IntelSYCL_COMPILE_DEFINITIONS})
-  list(APPEND IntelSYCL_flags "-D${def}")
+# Clean up list of compile definitions, add -D flags, and append to SYCL_flags
+list(REMOVE_DUPLICATES SYCL_COMPILE_DEFINITIONS)
+foreach(def ${SYCL_COMPILE_DEFINITIONS})
+  list(APPEND SYCL_flags "-D${def}")
 endforeach()
 
-set(IntelSYCL_host_compiler_flags "")
+set(SYCL_host_compiler_flags "")
 foreach(flag ${CMAKE_HOST_FLAGS})
   # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
-  string(APPEND IntelSYCL_host_compiler_flags ",\"${flag}\"")
+  string(APPEND SYCL_host_compiler_flags ",\"${flag}\"")
 endforeach()
-if (IntelSYCL_host_compiler_flags)
-  set(IntelSYCL_host_compiler_flags "-fsycl-host-compiler-options=${IntelSYCL_host_compiler_flags}")
+if (SYCL_host_compiler_flags)
+  set(SYCL_host_compiler_flags "-fsycl-host-compiler-options=${SYCL_host_compiler_flags}")
 endif()
 
-set(IntelSYCL_host_compiler "-fsycl-host-compiler=${IntelSYCL_HOST_COMPILER}")
+set(SYCL_host_compiler "-fsycl-host-compiler=${SYCL_HOST_COMPILER}")
 
-# IntelSYCL_execute_process - Executes a command with optional command echo and status message.
+# SYCL_execute_process - Executes a command with optional command echo and status message.
 #
 #   status  - Status message to print if verbose is true
 #   command - COMMAND argument from the usual execute_process argument structure
 #   ARGN    - Remaining arguments are the command with arguments
 #
-#   IntelSYCL_result - return value from running the command
+#   SYCL_result - return value from running the command
 #
 # Make this a macro instead of a function, so that things like RESULT_VARIABLE
 # and other return variables are present after executing the process.
-macro(IntelSYCL_execute_process status command)
+macro(SYCL_execute_process status command)
   set(_command ${command})
   if(NOT "x${_command}" STREQUAL "xCOMMAND")
-    message(FATAL_ERROR "Malformed call to IntelSYCL_execute_process.  Missing COMMAND as second argument. (command = ${command})")
+    message(FATAL_ERROR "Malformed call to SYCL_execute_process.  Missing COMMAND as second argument. (command = ${command})")
   endif()
   if(verbose)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E echo -- ${status})
     # Now we need to build up our command string.  We are accounting for quotes
     # and spaces, anything else is left up to the user to fix if they want to
     # copy and paste a runnable command line.
-    set(IntelSYCL_execute_process_string)
+    set(SYCL_execute_process_string)
     foreach(arg ${ARGN})
       # If there are quotes, excape them, so they come through.
       string(REPLACE "\"" "\\\"" arg ${arg})
       # Args with spaces need quotes around them to get them to be parsed as a single argument.
       if(arg MATCHES " ")
-        list(APPEND IntelSYCL_execute_process_string "\"${arg}\"")
+        list(APPEND SYCL_execute_process_string "\"${arg}\"")
       else()
-        list(APPEND IntelSYCL_execute_process_string ${arg})
+        list(APPEND SYCL_execute_process_string ${arg})
       endif()
     endforeach()
     # Echo the command
-    execute_process(COMMAND ${CMAKE_COMMAND} -E echo ${IntelSYCL_execute_process_string})
+    execute_process(COMMAND ${CMAKE_COMMAND} -E echo ${SYCL_execute_process_string})
   endif()
   # Run the command
-  execute_process(COMMAND ${ARGN} RESULT_VARIABLE IntelSYCL_result )
+  execute_process(COMMAND ${ARGN} RESULT_VARIABLE SYCL_result )
 endmacro()
 
 # Delete the target file
-IntelSYCL_execute_process(
+SYCL_execute_process(
   "Removing ${generated_file}"
   COMMAND "${CMAKE_COMMAND}" -E remove "${generated_file}"
   )
 
 # Generate the code
-IntelSYCL_execute_process(
+SYCL_execute_process(
   "Generating ${generated_file}"
-  COMMAND "${IntelSYCL_executable}"
+  COMMAND "${SYCL_executable}"
   "${source_file}"
   -o "${generated_file}"
-  ${IntelSYCL_flags}
-  ${IntelSYCL_include_args}
-  ${IntelSYCL_host_compiler}
-  ${IntelSYCL_host_compiler_flags}
+  ${SYCL_flags}
+  ${SYCL_include_args}
+  ${SYCL_host_compiler}
+  ${SYCL_host_compiler_flags}
   )
 
-if(IntelSYCL_result)
-  IntelSYCL_execute_process(
+if(SYCL_result)
+  SYCL_execute_process(
     "Removing ${generated_file}"
     COMMAND "${CMAKE_COMMAND}" -E remove "${generated_file}"
     )

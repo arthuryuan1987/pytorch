@@ -1,27 +1,25 @@
-# XPU backend is built with Intel SYCL
-# This file is to load Intel SYCL tool chain components
+# XPU backend stacks (compiler, runtime, libraries, tools)
 #
 # PYTORCH_FOUND_XPU
-# PYTORCH_IntelSYCL_LIBRARIES
-# IntelSYCL_INCLUDE_DIRS
+# PYTORCH_SYCL_LIBRARIES
+# SYCL_INCLUDE_PATHS
 #
 
 set(PYTORCH_FOUND_XPU FALSE)
 
-if(IntelSYCL_cmake_included)
+if(SYCL_cmake_included)
   return()
 endif()
-set(IntelSYCL_cmake_included true)
+set(SYCL_cmake_included true)
 
-include(FindPackageHandleStandardArgs)
-
-find_package(IntelSYCL REQUIRED)
-if(NOT IntelSYCL_FOUND)
-  message(FATAL_ERROR "Cannot find IntelSYCL compiler!")
+# SYCL compiler and runtime setup
+include(${CMAKE_CURRENT_LIST_DIR}/../Modules/FindSYCLToolkit.cmake)
+if(NOT SYCL_FOUND)
+  message(FATAL_ERROR "Cannot find SYCL compiler tool kit!")
 endif()
 
-# Try to find Intel SYCL version.hpp header
-find_file(INTEL_SYCL_VERSION
+# Try to find Intel SYCL compiler version.hpp header
+find_file(SYCL_VERSION
     NAMES version.hpp
     PATHS
         ${SYCL_INCLUDE_DIR}
@@ -31,26 +29,22 @@ find_file(INTEL_SYCL_VERSION
         sycl/CL/sycl
     NO_DEFAULT_PATH)
 
-if(NOT INTEL_SYCL_VERSION)
+if(NOT SYCL_VERSION)
   message(FATAL_ERROR "Can NOT find SYCL version file!")
 endif()
 
-set(PYTORCH_FOUND_XPU TRUE)
-
-set(IntelSYCL_INCLUDE_DIRS ${SYCL_INCLUDE_DIR})
-
-# Intel SYCL runtime
-find_library(PYTORCH_IntelSYCL_LIBRARIES sycl HINTS ${SYCL_LIBRARY_DIR})
+# SYCL runtime
+find_library(PYTORCH_SYCL_LIBRARIES sycl HINTS ${SYCL_LIBRARY_DIR})
 
 set(SYCL_COMPILER_VERSION)
-file(READ ${INTEL_SYCL_VERSION} version_contents)
+file(READ ${SYCL_VERSION} version_contents)
 string(REGEX MATCHALL "__SYCL_COMPILER_VERSION +[0-9]+" VERSION_LINE "${version_contents}")
 list(LENGTH VERSION_LINE ver_line_num)
 if (${ver_line_num} EQUAL 1)
   string(REGEX MATCHALL "[0-9]+" SYCL_COMPILER_VERSION "${VERSION_LINE}")
 endif()
 
-# offline compiler of IntelSYCL compiler
+# offline compiler of Intel SYCL compiler
 set(IGC_OCLOC_VERSION)
 find_program(OCLOC_EXEC ocloc)
 if(OCLOC_EXEC)
@@ -62,5 +56,9 @@ if(OCLOC_EXEC)
     string(STRIP "${drv_ver_contents}" IGC_OCLOC_VERSION)
   endif()
 endif()
+
+include(${CMAKE_CURRENT_LIST_DIR}/../Modules/FindSYCL.cmake)
+
+set(PYTORCH_FOUND_XPU TRUE)
 
 message(STATUS "XPU found")
