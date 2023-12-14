@@ -1312,19 +1312,20 @@ endif()
 if(USE_XPU)
   include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
   if(PYTORCH_FOUND_XPU)
-    # # -- Host flags (XPU_CXX_FLAGS)
-    # list(APPEND XPU_CXX_FLAGS -fPIC)
-    # list(APPEND XPU_CXX_FLAGS -Wno-shift-count-negative)
-    # list(APPEND XPU_CXX_FLAGS -Wno-shift-count-overflow)
-    # list(APPEND XPU_CXX_FLAGS -Wno-duplicate-decl-specifier)
-    # list(APPEND XPU_CXX_FLAGS -std=c++17)
+    # # -- Host flags (SYCL_CXX_FLAGS)
+    # Combine with torch_compile_options
+    list(APPEND SYCL_HOST_FLAGS -fPIC)
+    list(APPEND SYCL_HOST_FLAGS -Wno-shift-count-negative)
+    list(APPEND SYCL_HOST_FLAGS -Wno-shift-count-overflow)
+    list(APPEND SYCL_HOST_FLAGS -Wno-duplicate-decl-specifier)
+    list(APPEND SYCL_HOST_FLAGS -std=c++17)
 
-    # if(CMAKE_BUILD_TYPE MATCHES Debug)
-    #    list(APPEND XPU_CXX_FLAGS -g2)
-    #    list(APPEND XPU_CXX_FLAGS -O0)
-    # endif(CMAKE_BUILD_TYPE MATCHES Debug)
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+       list(APPEND SYCL_HOST_FLAGS -g2)
+       list(APPEND SYCL_HOST_FLAGS -O0)
+    endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
-    # -- Kernel flags (SYCL_KERNEL_COMPILE_OPTIONS)
+    # -- Kernel flags (SYCL_KERNEL_OPTIONS)
     # The fast-math will be enabled by default in SYCL compiler.
     # Refer to [https://clang.llvm.org/docs/UsersManual.html#cmdoption-fno-fast-math]
     # 1. We enable below flags here to be warn about NaN and Infinity,
@@ -1334,10 +1335,14 @@ if(USE_XPU)
     # 3. The approx-func allows certain math function calls (such as log, sqrt, pow, etc)
     # to be replaced with an approximately equivalent set of instructions or
     # alternative math function calls, which have great errors.
-    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fhonor-nans)
-    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fhonor-infinities)
-    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fno-associative-math)
-    set(SYCL_KERNEL_COMPILE_OPTIONS ${SYCL_KERNEL_COMPILE_OPTIONS} -fno-approx-func)
+    set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fno-sycl-unnamed-lambda)
+    set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -sycl-std=2020)
+    set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fhonor-nans)
+    set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fhonor-infinities)
+    set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fno-associative-math)
+    set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -fno-approx-func)
+    set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -D_GLIBCXX_USE_CXX11_ABI=1)
+    set(SYCL_FLAGS ${SYCL_FLAGS} ${SYCL_KERNEL_OPTIONS})
 
     # -- Link flags
     include(ProcessorCount)
@@ -1347,22 +1352,22 @@ if(USE_XPU)
     else()
       set(SYCL_MAX_PARALLEL_LINK_JOBS ${proc_cnt})
     endif()
-    set(SYCL_KERNEL_LINK_OPTIONS ${SYCL_KERNEL_LINK_OPTIONS} -fsycl-max-parallel-link-jobs=${SYCL_MAX_PARALLEL_LINK_JOBS})
-    set(SYCL_KERNEL_LINK_OPTIONS ${SYCL_KERNEL_LINK_OPTIONS} -fsycl-targets=spir64_gen,spir64)
-    set(SYCL_KERNEL_LINK_OPTIONS ${SYCL_KERNEL_LINK_OPTIONS} -flink-huge-device-code)
+    set(SYCL_LINK_OPTIONS ${SYCL_LINK_OPTIONS} -fsycl-max-parallel-link-jobs=${SYCL_MAX_PARALLEL_LINK_JOBS})
+    set(SYCL_LINK_OPTIONS ${SYCL_LINK_OPTIONS} -fsycl-targets=spir64_gen,spir64)
+    set(SYCL_LINK_OPTIONS ${SYCL_LINK_OPTIONS} -flink-huge-device-code)
     # SYCL_FLAGS: `-fsycl`, a kernel building flag setup by Intel SYCL compiler cmake.
-    set(SYCL_FLAGS ${SYCL_FLAGS} ${SYCL_KERNEL_COMPILE_OPTIONS} ${SYCL_KERNEL_LINK_OPTIONS})
+    set(SYCL_LINK_FLAGS ${SYCL_FLAGS} ${SYCL_LINK_OPTIONS})
 
-    # -- offline compiler flags (SYCL_OFFLINE_COMPILER_OPTIONS. SPIRV -> BIN)
-    # offline compiler (Intel Graphics Compiler. IGC) of Intel SYCL compiler is to compile SPIRV and output kernel binary.
-    set(SYCL_ARCH_TARGET "-device ${PYTORCH_XPU_ARCH}")
-    set(SYCL_OFFLINE_COMPILER_OPTIONS "${SYCL_OFFLINE_COMPILER_OPTIONS} -cl-intel-enable-auto-large-GRF-mode")
-    set(SYCL_OFFLINE_COMPILER_OPTIONS "${SYCL_OFFLINE_COMPILER_OPTIONS} -cl-poison-unsupported-fp64-kernels")
-    set(SYCL_OFFLINE_COMPILER_OPTIONS "-options '${SYCL_OFFLINE_COMPILER_OPTIONS}'")
-    set(SYCL_OFFLINE_COMPILER_OPTIONS -Xs ${SYCL_ARCH_TARGET} ${SYCL_OFFLINE_COMPILER_OPTIONS})
+    # -- target compiler flags
+    # target compiler (Intel Graphics Compiler. IGC) of Intel SYCL compiler is to compile SPIRV and output kernel binary.
+    set(SYCL_ARCH_TARGET "-device pvc") # Only support AOT build for Intel Data Center Max GPU in PyTorch at current stage.
+    set(SYCL_TARGET_COMPILER_OPTIONS ${SYCL_TARGET_COMPILER_OPTIONS} "-options -cl-intel-enable-auto-large-GRF-mode")
+    set(SYCL_TARGET_COMPILER_OPTIONS ${SYCL_TARGET_COMPILER_OPTIONS} "-options -cl-poison-unsupported-fp64-kernels")
+    set(SYCL_TARGET_COMPILER_FLAGS ${SYCL_ARCH_TARGET} ${SYCL_TARGET_COMPILER_OPTIONS})
 
-    # offline options (SYCL_OFFLINE_COMPILER_OPTIONS) must be appended at the end of link flags
-    set(SYCL_FLAGS ${SYCL_FLAGS} ${SYCL_OFFLINE_COMPILER_OPTIONS})
+    if(BUILD_TEST)
+      add_subdirectory(${PROJECT_SOURCE_DIR}/test/cpp/sycl ${CMAKE_BINARY_DIR}/test_sycl)
+    endif()
   endif()
 endif()
 

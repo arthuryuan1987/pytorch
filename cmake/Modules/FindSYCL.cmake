@@ -1,3 +1,73 @@
+#.rst:
+# FindSYCL
+# --------
+#
+# .. note::
+
+# The following variables affect the behavior of the macros in the script needed
+# to be defined before calling ``SYCL_ADD_EXECUTABLE`` or ``SYCL_ADD_LIBRARY``::
+#
+#  SYCL_COMPILER
+#  -- SYCL compiler's excutable.
+#
+#  SYCL_FLAGS
+#  -- SYCL compiler's compilation command line arguments.
+#
+#  SYCL_LINK_FLAGS
+#  -- SYCL compiler's linkage command line arguments.
+#
+#  SYCL_HOST_FLAGS
+#  -- SYCL compiler's 3rd party host compiler (e.g. gcc) arguments .
+#
+#  SYCL_TARGET_COMPILER_FLAGS
+#  -- SYCL compiler's target compiler (e.g. igc) arguments.
+#
+#  SYCL_INCLUDE_DIR
+#  -- Include directory for SYCL compiler/runtime headers.
+#
+#  SYCL_LIBRARY_DIR
+#  -- Include directory for SYCL compiler/runtime libraries.
+#
+#  SYCL_LINK_LIBRARIES_KEYWORD
+#  -- Config KEYWORD of TARGET_LINK_LIBRARIES for SYCL_LIBRARIES
+
+# Helpers::
+#
+#  SYCL_ADD_EXECUTABLE
+#  -- Helper to define a cmake executable target. All involed .cpp files
+#     are compiled and linked by SYCL compiler.
+#
+#  SYCL_ADD_LIBRARY
+#  -- Helper to define a cmake library target. All involed .cpp files
+#     are compiled and linked by SYCL compiler.
+#
+#  SYCL_ADD_LIBRARY
+#  -- Helper to define a cmake library target. All involed .cpp files
+#     are compiled and linked by SYCL compiler.
+#
+#  SYCL_INCLUDE_DIRECTORIES
+#  -- Helper to add user specified include directories. Added include
+#     directories will be referenced in compile command line of following
+#     ``SYCL_ADD_EXECUTABLE`` or ``SYCL_ADD_LIBRARY``.
+
+# Exmpale::
+# The helpers cannot distinguish SYCL kernel inlined sources and
+# host only sources, since all sources' name are suffixed with .cpp.
+# We still recommend user to compile host only sources with
+# ``CAMKE_CXX_COMPILER`` and to compile SYCL kernel inlined sources with
+# ``SYCL_COMPILER``. So there is something to do from caller side.
+#
+#  # Example to build a shared library
+#
+#  # Define a static library for SYCL kernel inlined sources.
+#  sycl_add_library(your_target_kernel STARTIC ${SYCL_KERNEL_SRCS})
+#
+#  # Define your target 
+#  add_library(your_target SHARED ${HOST_ONLY_SRCS})
+#
+#  # Define linkage for your_target_kernel
+#  target_link_libraries(your_target your_target_kernel)
+
 # The MIT License
 #
 # License for the specific language governing rights and limitations under
@@ -44,10 +114,11 @@ endmacro()
 # SYCL_HOST_COMPILER
 set(SYCL_HOST_COMPILER "${CMAKE_CXX_COMPILER}"
   CACHE FILEPATH "Host side compiler used by SYCL")
+set(SYCL_INCLUDE_DIRS_USER "")
 
 # SYCL_EXECUTABLE
-if(DEFINED ENV{SYCL_EXECUTABLE})
-  set(SYCL_EXECUTABLE "$ENV{SYCL_EXECUTABLE}" CACHE FILEPATH "The Intel SYCL compiler")
+if(SYCL_COMPILER)
+  set(SYCL_EXECUTABLE ${SYCL_COMPILER} CACHE FILEPATH "The Intel SYCL compiler")
 else()
   find_program(SYCL_EXECUTABLE
     NAMES icpx
@@ -56,6 +127,10 @@ else()
     NO_DEFAULT_PATH
     )
 endif()
+
+set(SYCL_LIBRARIES)
+find_library(SYCL_RUNTIME_LIBRARY sycl HINTS ${SYCL_LIBRARY_DIR})
+list(APPEND SYCL_LIBRARIES ${SYCL_RUNTIME_LIBRARY})
 
 # SYCL_VERBOSE_BUILD
 option(SYCL_VERBOSE_BUILD "Print out the commands run while compiling the SYCL source file.  With the Makefile generator this defaults to VERBOSE variable specified on the command line, but can be forced on with this option." OFF)
@@ -86,7 +161,22 @@ macro(SYCL_INCLUDE_DEPENDENCIES dependency_file)
   include(${dependency_file})
 endmacro()
 
-sycl_find_helper_file(run_sycl cmake)
+###############################################################################
+# Macros
+###############################################################################
+
+###############################################################################
+# Add include directories to pass to the sycl compiler command.
+macro(SYCL_INCLUDE_DIRECTORIES)
+  foreach(dir ${ARGN})
+    list(APPEND SYCL_INCLUDE_DIRS_USER ${dir})
+  endforeach()
+endmacro()
+
+
+###############################################################################
+sycl_find_helper_file(run_compile cmake)
+sycl_find_helper_file(run_link cmake)
 
 ##############################################################################
 # Separate the OPTIONS out from the sources
@@ -174,10 +264,10 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
   set(SYCL_C_OR_CXX CXX)
   set(generated_extension ${CMAKE_${SYCL_C_OR_CXX}_OUTPUT_EXTENSION})
 
-  list(APPEND SYCL_INCLUDE_DIRS "$<TARGET_PROPERTY:${sycl_target},INCLUDE_DIRECTORIES>")
+  set(SYCL_include_dirs ${SYCL_INCLUDE_DIRS_USER} "${SYCL_INCLUDE_DIR}")
+  list(APPEND SYCL_include_dirs "$<TARGET_PROPERTY:${sycl_target},INCLUDE_DIRECTORIES>")
 
-  # Do the same thing with compile definitions
-  set(SYCL_COMPILE_DEFINITIONS "$<TARGET_PROPERTY:${sycl_target},COMPILE_DEFINITIONS>")
+  set(SYCL_compile_definitions "$<TARGET_PROPERTY:${sycl_target},COMPILE_DEFINITIONS>")
 
   SYCL_GET_SOURCES_AND_OPTIONS(_SYCL_wrap_sources _SYCL_wrap_cmake_options __SYCL_wrap_options ${_argn_list})
   set(_SYCL_build_shared_libs FALSE)
@@ -201,16 +291,14 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
     set(SYCL_HOST_SHARED_FLAGS)
   endif()
 
-  set(_SYCL_host_flags "set(CMAKE_HOST_FLAGS ${CMAKE_${SYCL_C_OR_CXX}_FLAGS} ${SYCL_HOST_SHARED_FLAGS})")
+  set(SYCL_host_flags ${CMAKE_${SYCL_C_OR_CXX}_FLAGS} ${SYCL_HOST_SHARED_FLAGS} ${SYCL_HOST_FLAGS})
 
   # Reset the output variable
   set(_SYCL_wrap_generated_files "")
   foreach(file ${_argn_list})
     get_source_file_property(_is_header ${file} HEADER_FILE_ONLY)
     # SYCL kernels are in .cpp file
-    if(Not _is_header)
-      set( SYCL_compile_to_external_module OFF )
-      set(SYCL_HOST_FLAGS ${_SYCL_host_flags})
+    if((${file} MATCHES "\\.cpp$") AND NOT _is_header)
 
       # Determine output directory
       SYCL_COMPUTE_BUILD_PATH("${file}" SYCL_build_path)
@@ -239,14 +327,14 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
         set(source_file "${CMAKE_CURRENT_SOURCE_DIR}/${file}")
       endif()
 
-      list(APPEND ${sycl_target}_SEPARABLE_COMPILATION_OBJECTS "${generated_file}")
+      list(APPEND ${sycl_target}_INTERMEDIATE_LINK_OBJECTS "${generated_file}")
 
       SYCL_INCLUDE_DEPENDENCIES(${cmake_dependency_file})
 
       set(SYCL_build_type "Device")
 
       # Configure the build script
-      configure_file("${SYCL_run_sycl}" "${custom_target_script_pregen}" @ONLY)
+      configure_file("${SYCL_run_compile}" "${custom_target_script_pregen}" @ONLY)
       file(GENERATE
         OUTPUT "${custom_target_script}"
         INPUT "${custom_target_script_pregen}"
@@ -273,7 +361,7 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
       add_custom_command(
         OUTPUT ${generated_file}
         # These output files depend on the source_file and the contents of cmake_dependency_file
-        ${main_dep}
+        MAIN_DEPENDENCY ${main_dep}
         DEPENDS ${SYCL_DEPEND}
         DEPENDS ${custom_target_script}
         # Make sure the output directory exists before trying to write to it.
@@ -302,7 +390,7 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
   set(${generated_files} ${_SYCL_wrap_generated_files})
 endmacro()
 
-function(_SYCL_get_important_host_flags important_flags flag_string)
+function(_sycl_get_important_host_flags important_flags flag_string)
   string(REGEX MATCHALL "-fPIC" flags "${flag_string}")
   list(APPEND ${important_flags} ${flags})
   set(${important_flags} ${${important_flags}} PARENT_SCOPE)
@@ -328,6 +416,21 @@ endfunction()
 function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target options object_files)
   if (object_files)
 
+    set(important_host_flags)
+    _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
+    set(SYCL_link_flags ${important_host_flags} ${SYCL_LINK_FLAGS})
+
+    list(APPEND SYCL_link_flags "$<TARGET_PROPERTY:${sycl_target},LINK_LIBRARIES_FLAGS>")
+
+    set(SYCL_target_compiler_flags "")
+    foreach(flag ${SYCL_TARGET_COMPILER_FLAGS})
+      string(APPEND SYCL_target_compiler_flags "${flag} ")
+    endforeach()
+
+    set(custom_target_script_pregen "${output_file}.cmake.pre-gen")
+    set(custom_target_script "${output_file}$<$<BOOL:$<CONFIG>>:.$<CONFIG>>.cmake")
+    set(cmake_dependency_file "${output_file}.depend")
+
     set_source_files_properties("${output_file}"
       PROPERTIES
       EXTERNAL_OBJECT TRUE # This is an object file not to be compiled, but only
@@ -335,33 +438,81 @@ function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target options object_f
       GENERATED TRUE       # This file is generated during the build
       )
 
-    # Flags
-    set(SYCL_flags ${SYCL_FLAGS})
-
-    # Host compiler
-    set(important_host_flags)
-    _SYCL_get_important_host_flags(important_host_flags "${CMAKE_HOST_FLAGS}")
-
-    set(SYCL_host_compiler_flags "")
-    foreach(flag ${important_host_flags})
-      # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
-      string(APPEND SYCL_host_compiler_flags ",\"${flag}\"")
-    endforeach()
-    set(SYCL_host_compiler_flags "-fsycl-host-compiler-options=${SYCL_host_compiler_flags}")
-
-    list( FIND SYCL_flags "-fsycl-host-compiler=" "-fsycl-host-compiler=${SYCL_HOST_COMPILER}")
-    list( FIND SYCL_flags "-fsycl-host-compiler-options=" ${SYCL_host_compiler_flags})
-
+    file(REAL_PATH working_directory "${output_file}")
     file(RELATIVE_PATH output_file_relative_path "${CMAKE_BINARY_DIR}" "${output_file}")
 
+    SYCL_INCLUDE_DEPENDENCIES(${cmake_dependency_file})
+
+    # Configure the build script
+    configure_file("${SYCL_run_link}" "${custom_target_script_pregen}" @ONLY)
+    file(GENERATE
+      OUTPUT "${custom_target_script}"
+      INPUT "${custom_target_script_pregen}"
+      )
+
+    set(main_dep MAIN_DEPENDENCY ${object_files})
+
+    if(SYCL_VERBOSE_BUILD)
+      set(verbose_output ON)
+    elseif(CMAKE_GENERATOR MATCHES "Makefiles")
+      set(verbose_output "$(VERBOSE)")
+    # This condition lets us also turn on verbose output when someone
+    # specifies CMAKE_VERBOSE_MAKEFILE, even if the generator isn't
+    # the Makefiles generator (this is important for us, Ninja users.)
+    elseif(CMAKE_VERBOSE_MAKEFILE)
+      set(verbose_output ON)
+    else()
+      set(verbose_output OFF)
+    endif()
+
+    # Build the generated file and dependency file ##########################
     add_custom_command(
       OUTPUT ${output_file}
-      DEPENDS ${object_files}
-      COMMAND ${SYCL_EXECUTABLE} ${SYCL_flags} ${object_files} -o ${output_file}
+      # These output files depend on the source_file and the contents of cmake_dependency_file
+      MAIN_DEPENDENCY ${main_dep}
+      DEPENDS ${SYCL_DEPEND}
+      DEPENDS ${custom_target_script}
+      # Make sure the output directory exists before trying to write to it.
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${generated_file_path}"
+      COMMAND ${CMAKE_COMMAND} ARGS
+        -D verbose:BOOL=${verbose_output}
+        -D "output_file:STRING=${output_file}"
+        -P "${custom_target_script}"
+      WORKING_DIRECTORY "${working_directory}"
       COMMENT "Building SYCL intermediate link file ${output_file_relative_path}"
       )
   endif()
 endfunction()
+
+###############################################################################
+# TARGET LINK LIBRARIES
+#
+# Supported: full name library, STATIC_LIBRARY/SHARED_LIBRARY target and command.
+# The helper does not support intereface mode KEYWORD.
+###############################################################################
+macro(SYCL_TARGET_LINK_LIBRARIES target)
+  get_property(link_libraries_flags TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS)
+  set(libs ${ARGN})
+  foreach(lib ${libs})
+    if(TARGET ${lib})
+      # target
+      get_property(type TARGET ${lib} PROPERTY TYPE)
+      if(${type} MATCHES STATIC_LIBRARY OR ${type} MATCHES SHARED_LIBRARY)
+        get_property(lib_name TARGET ${lib} PROPERTY NAME)
+        set(link_libraries_flags ${link_libraries_flags} "-l${lib_name}")
+      else()
+        message(FATAL_ERROR "SYCL_TARGET_LINK_LIBRARIES doesn't support target types except for STATIC_LIBRARY and SHARED_LIBRARY")
+      endif()
+    elseif(EXISTS ${lib})
+      # library
+      set(link_libraries_flags ${link_libraries_flags} "-l:${lib}")
+    elseif(NOT ${lib} STREQUAL ""})
+      # command
+      set(link_libraries_flags ${link_libraries_flags} "${lib}")
+    endif()
+  endforeach()
+  set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
+endmacro()
 
 ###############################################################################
 # ADD LIBRARY
@@ -396,6 +547,7 @@ macro(SYCL_ADD_LIBRARY sycl_target)
     )
 
   # Add a link phase for custom linkage command
+  # To generate target binary code on linkage
   SYCL_INTERMEDIATE_LINK_OBJECTS("${link_file}" ${sycl_target} "${_options}" "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}")
 
   target_link_libraries(${sycl_target} ${SYCL_LINK_LIBRARIES_KEYWORD}

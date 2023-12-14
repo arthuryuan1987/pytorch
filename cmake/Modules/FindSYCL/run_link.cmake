@@ -26,53 +26,28 @@
 # file checks the output of each command and if the command fails it deletes the
 # output files.
 
+# Linkage of SYCL program involves a sub-phase. Target binary is produced
+# at the sub-phase. Target compiler flags need to be specified.
+
 # Input variables
 #
 # verbose:BOOL=<>          OFF: Be as quiet as possible (default)
 #                          ON : Describe each step
 #
-# generated_file:STRING=<> File to generate.  This argument must be passed in.
+# output_file:STRING=<> File to generate.  This argument must be passed in.
 
 cmake_policy(PUSH)
 cmake_policy(SET CMP0007 NEW)
 cmake_policy(SET CMP0010 NEW)
-if(NOT generated_file)
+if(NOT output_file)
   message(FATAL_ERROR "You must specify generated_file on the command line")
 endif()
 
 set(CMAKE_COMMAND "@CMAKE_COMMAND@") # path
-set(source_file "@source_file@") # path
-set(SYCL_generated_dependency_file "@SYCL_generated_dependency_file@") # path
-set(cmake_dependency_file "@cmake_dependency_file@") # path
-set(SYCL_HOST_COMPILER "@SYCL_HOST_COMPILER@") # path
-set(generated_file_path "@generated_file_path@") # path
-set(generated_file_internal "@generated_file@") # path
 set(SYCL_executable "@SYCL_EXECUTABLE@") # path
-set(SYCL_flags @SYCL_flags@) # list
-
-list(REMOVE_DUPLICATES SYCL_INCLUDE_DIRS)
-set(SYCL_include_args)
-foreach(dir ${SYCL_INCLUDE_DIRS})
-  # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
-  list(APPEND SYCL_include_args "-I${dir}")
-endforeach()
-
-# Clean up list of compile definitions, add -D flags, and append to SYCL_flags
-list(REMOVE_DUPLICATES SYCL_COMPILE_DEFINITIONS)
-foreach(def ${SYCL_COMPILE_DEFINITIONS})
-  list(APPEND SYCL_flags "-D${def}")
-endforeach()
-
-set(SYCL_host_compiler_flags "")
-foreach(flag ${CMAKE_HOST_FLAGS})
-  # Extra quotes are added around each flag to help Intel SYCL parse out flags with spaces.
-  string(APPEND SYCL_host_compiler_flags ",\"${flag}\"")
-endforeach()
-if (SYCL_host_compiler_flags)
-  set(SYCL_host_compiler_flags "-fsycl-host-compiler-options=${SYCL_host_compiler_flags}")
-endif()
-
-set(SYCL_host_compiler "-fsycl-host-compiler=${SYCL_HOST_COMPILER}")
+set(object_files "@object_files@") # list
+set(SYCL_link_flags [==[@SYCL_link_flags@]==]) # list
+set(SYCL_target_compiler_flags "@SYCL_target_compiler_flags@") # list
 
 # SYCL_execute_process - Executes a command with optional command echo and status message.
 #
@@ -89,6 +64,7 @@ macro(SYCL_execute_process status command)
   if(NOT "x${_command}" STREQUAL "xCOMMAND")
     message(FATAL_ERROR "Malformed call to SYCL_execute_process.  Missing COMMAND as second argument. (command = ${command})")
   endif()
+  set(verbose TRUE)
   if(verbose)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E echo -- ${status})
     # Now we need to build up our command string.  We are accounting for quotes
@@ -114,31 +90,30 @@ endmacro()
 
 # Delete the target file
 SYCL_execute_process(
-  "Removing ${generated_file}"
-  COMMAND "${CMAKE_COMMAND}" -E remove "${generated_file}"
+  "Removing ${output_file}"
+  COMMAND "${CMAKE_COMMAND}" -E remove "${output_file}"
   )
 
 # Generate the code
 SYCL_execute_process(
-  "Generating ${generated_file}"
-  COMMAND "${SYCL_executable}"
-  "${source_file}"
-  -o "${generated_file}"
-  ${SYCL_flags}
-  ${SYCL_include_args}
-  ${SYCL_host_compiler}
-  ${SYCL_host_compiler_flags}
+  "Generating ${output_file}"
+  COMMAND ${SYCL_executable}
+  ${object_files}
+  -o ${output_file}
+  ${SYCL_link_flags}
+  -Xs
+  ${SYCL_target_compiler_flags}
   )
 
 if(SYCL_result)
   SYCL_execute_process(
-    "Removing ${generated_file}"
-    COMMAND "${CMAKE_COMMAND}" -E remove "${generated_file}"
+    "Removing ${output_file}"
+    COMMAND "${CMAKE_COMMAND}" -E remove "${output_file}"
     )
-  message(FATAL_ERROR "Error generating file ${generated_file}")
+  message(FATAL_ERROR "Error generating file ${output_file}")
 else()
   if(verbose)
-    message("Generated ${generated_file} successfully.")
+    message("Generated ${output_file} successfully.")
   endif()
 endif()
 

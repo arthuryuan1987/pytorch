@@ -33,8 +33,12 @@ if(NOT SYCL_VERSION)
   message(FATAL_ERROR "Can NOT find SYCL version file!")
 endif()
 
-# SYCL runtime
 find_library(PYTORCH_SYCL_LIBRARIES sycl HINTS ${SYCL_LIBRARY_DIR})
+
+# SYCL runtime cmake target
+add_library(torch::syclrt INTERFACE IMPORTED)
+set_property(TARGET torch::syclrt APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${SYCL_INCLUDE_DIR})
+set_property(TARGET torch::syclrt APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${PYTORCH_SYCL_LIBRARIES})
 
 set(SYCL_COMPILER_VERSION)
 file(READ ${SYCL_VERSION} version_contents)

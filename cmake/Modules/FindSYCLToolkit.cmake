@@ -28,6 +28,8 @@ This will define the following variables:
 
 ``SYCL_FOUND``
   True if the system has the SYCL library.
+``SYCL_COMPILER``
+  SYCL compiler executable.
 ``SYCL_INCLUDE_DIR``
   Include directories needed to use SYCL.
 ``SYCL_LIBRARY_DIR``
