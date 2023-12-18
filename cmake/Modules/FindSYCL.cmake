@@ -191,8 +191,7 @@ macro(SYCL_GET_SOURCES_AND_OPTIONS _sources _cmake_options _options)
       set( _found_options TRUE )
     elseif(
         "x${arg}" STREQUAL "xSTATIC" OR
-        "x${arg}" STREQUAL "xSHARED" OR
-        "x${arg}" STREQUAL "xMODULE"
+        "x${arg}" STREQUAL "xSHARED"
         )
       list(APPEND ${_cmake_options} ${arg})
     else()
@@ -413,12 +412,20 @@ function(SYCL_COMPUTE_INTERMEDIATE_LINK_OBJECT_FILE_NAME output_file_var sycl_ta
 endfunction()
 
 # Setup the build rule for the separable compilation intermediate link file.
-function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target options object_files)
+function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target _cmake_options options object_files)
   if (object_files)
+    set(link_type_flag)
+    if("x${_cmake_options}" STREQUAL "xSTATIC")
+      set(link_type_flag "-static")
+    elseif("x${_cmake_options}" STREQUAL "xSHARED")
+      set(link_type_flag "-shared")
+    else()
+      message(FATAL_ERROR "SYCL_ADD_LIBRARY only supports STATIC or SHARED, but gets: " ${_cmake_options})
+    endif()
 
     set(important_host_flags)
     _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
-    set(SYCL_link_flags ${important_host_flags} ${SYCL_LINK_FLAGS})
+    set(SYCL_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_LINK_FLAGS})
 
     list(APPEND SYCL_link_flags "$<TARGET_PROPERTY:${sycl_target},LINK_LIBRARIES_FLAGS>")
 
@@ -505,8 +512,11 @@ macro(SYCL_TARGET_LINK_LIBRARIES target)
       endif()
     elseif(EXISTS ${lib})
       # library
-      set(link_libraries_flags ${link_libraries_flags} "-l:${lib}")
-    elseif(NOT ${lib} STREQUAL ""})
+      get_filename_component(path ${lib} DIRECTORY)
+      get_filename_component(full_name ${lib} NAME)
+      set(link_libraries_flags ${link_libraries_flags} "-L${path}")
+      set(link_libraries_flags ${link_libraries_flags} "-l:${full_name}")
+    elseif(NOT ${lib} STREQUAL "")
       # command
       set(link_libraries_flags ${link_libraries_flags} "${lib}")
     endif()
@@ -516,6 +526,7 @@ endmacro()
 
 ###############################################################################
 # ADD LIBRARY
+# _cmake_options: STATIC or SHARED only
 ###############################################################################
 macro(SYCL_ADD_LIBRARY sycl_target)
 
@@ -539,16 +550,12 @@ macro(SYCL_ADD_LIBRARY sycl_target)
     "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}"
     )
 
-  # Add the library.
-  add_library(${sycl_target} ${_cmake_options}
-    ${_generated_files}
-    ${_sources}
-    ${link_file}
-    )
+  # Create library target.
+  add_library(${sycl_target} ${_cmake_options} ${link_file})
 
   # Add a link phase for custom linkage command
   # To generate target binary code on linkage
-  SYCL_INTERMEDIATE_LINK_OBJECTS("${link_file}" ${sycl_target} "${_options}" "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}")
+  SYCL_INTERMEDIATE_LINK_OBJECTS("${link_file}" ${sycl_target} ${_cmake_options} "${_options}" "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}")
 
   target_link_libraries(${sycl_target} ${SYCL_LINK_LIBRARIES_KEYWORD}
     ${SYCL_LIBRARIES}
