@@ -414,17 +414,9 @@ endfunction()
 # Setup the build rule for the separable compilation intermediate link file.
 function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target _cmake_options options object_files)
   if (object_files)
-    set(link_type_flag)
-    if("x${_cmake_options}" STREQUAL "xSTATIC")
-      set(link_type_flag "-static")
-    elseif("x${_cmake_options}" STREQUAL "xSHARED")
-      set(link_type_flag "-shared")
-    else()
-      message(FATAL_ERROR "SYCL_ADD_LIBRARY only supports STATIC or SHARED, but gets: " ${_cmake_options})
-    endif()
-
     set(important_host_flags)
     _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
+    set(link_type_flag "-shared") # archive only without desiding linkage statically
     set(SYCL_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_LINK_FLAGS})
 
     list(APPEND SYCL_link_flags "$<TARGET_PROPERTY:${sycl_target},LINK_LIBRARIES_FLAGS>")

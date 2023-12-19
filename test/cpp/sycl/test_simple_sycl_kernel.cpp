@@ -7,7 +7,7 @@ TEST(SYCLBuildingSysTest, SimpleKernelExecution) {
   float a[1024];
 
   // a simple sycl kernel
-  itoa(&a, numel);
+  itoa(a, numel);
 
   bool success = true;
   for (int i = 0; i < numel; i++) {
