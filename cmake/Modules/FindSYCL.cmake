@@ -416,8 +416,7 @@ function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target _cmake_options o
   if (object_files)
     set(important_host_flags)
     _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
-    set(link_type_flag "-shared") # archive only without desiding linkage statically
-    set(SYCL_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_LINK_FLAGS})
+    set(SYCL_link_flags ${important_host_flags} ${SYCL_LINK_FLAGS})
 
     list(APPEND SYCL_link_flags "$<TARGET_PROPERTY:${sycl_target},LINK_LIBRARIES_FLAGS>")
 
@@ -518,7 +517,6 @@ endmacro()
 
 ###############################################################################
 # ADD LIBRARY
-# _cmake_options: STATIC or SHARED only
 ###############################################################################
 macro(SYCL_ADD_LIBRARY sycl_target)
 
@@ -536,18 +534,18 @@ macro(SYCL_ADD_LIBRARY sycl_target)
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_INTERMEDIATE_LINK_OBJECT_FILE_NAME(
-    link_file
-    ${sycl_target}
-    "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}"
-    )
+  # SYCL_COMPUTE_INTERMEDIATE_LINK_OBJECT_FILE_NAME(
+  #   link_file
+  #   ${sycl_target}
+  #   "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}"
+  #   )
 
   # Create library target.
   add_library(${sycl_target} ${_cmake_options} ${link_file})
 
   # Add a link phase for custom linkage command
   # To generate target binary code on linkage
-  SYCL_INTERMEDIATE_LINK_OBJECTS("${link_file}" ${sycl_target} ${_cmake_options} "${_options}" "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}")
+  # SYCL_INTERMEDIATE_LINK_OBJECTS("${link_file}" ${sycl_target} ${_cmake_options} "${_options}" "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}")
 
   target_link_libraries(${sycl_target} ${SYCL_LINK_LIBRARIES_KEYWORD}
     ${SYCL_LIBRARIES}

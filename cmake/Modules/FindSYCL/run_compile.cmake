@@ -93,6 +93,7 @@ macro(SYCL_execute_process status command)
   if(NOT "x${_command}" STREQUAL "xCOMMAND")
     message(FATAL_ERROR "Malformed call to SYCL_execute_process.  Missing COMMAND as second argument. (command = ${command})")
   endif()
+  set(verbose TRUE)
   if(verbose)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E echo -- ${status})
     # Now we need to build up our command string.  We are accounting for quotes
