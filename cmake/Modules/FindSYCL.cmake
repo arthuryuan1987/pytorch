@@ -181,25 +181,36 @@ sycl_find_helper_file(run_link cmake)
 ##############################################################################
 # Separate the OPTIONS out from the sources
 ##############################################################################
-macro(SYCL_GET_SOURCES_AND_OPTIONS _sources _cmake_options _options)
-  set( ${_sources} )
+macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cpp_sources _cmake_options)
   set( ${_cmake_options} )
-  set( ${_options} )
   set( _found_options FALSE )
+  set( _found_sycl_sources FALSE )
+  set( _found_cpp_sources FALSE )
   foreach(arg ${ARGN})
     if("x${arg}" STREQUAL "xOPTIONS")
       set( _found_options TRUE )
+      set( _found_sycl_sources FALSE )
+      set( _found_cpp_sources FALSE )
     elseif(
         "x${arg}" STREQUAL "xSTATIC" OR
         "x${arg}" STREQUAL "xSHARED"
         )
       list(APPEND ${_cmake_options} ${arg})
+    elseif("x${arg}" STREQUAL "xSYCL_SOURCES")
+      set( _found_options FALSE )
+      set( _found_sycl_sources TRUE )
+      set( _found_cpp_sources FALSE )
+    elseif("x${arg}" STREQUAL "xCPP_SOURCES")
+      set( _found_options FALSE )
+      set( _found_sycl_sources FALSE )
+      set( _found_cpp_sources TRUE )
     else()
       if ( _found_options )
-        list(APPEND ${_options} ${arg})
-      else()
-        # Assume this is a file
-        list(APPEND ${_sources} ${arg})
+        message(FATAL_ERROR "sycl_add_executable/library doesn't support OPTIONS keyword.")
+      elseif ( _found_sycl_sources )
+        list(APPEND ${_sycl_sources} ${arg})
+      elseif ( _found_cpp_sources )
+        list(APPEND ${_cpp_sources} ${arg})
       endif()
     endif()
   endforeach()
@@ -256,9 +267,8 @@ endfunction()
 # OUTPUT:
 #   generated_files     - List of generated files
 ##############################################################################
-macro(SYCL_WRAP_SRCS sycl_target generated_files)
+macro(SYCL_WRAP_SRCS sycl_target generated_files _cmake_options sources)
   # Optional arguments
-  set(_argn_list "${ARGN}")
   set(SYCL_flags "")
   set(SYCL_C_OR_CXX CXX)
   set(generated_extension ${CMAKE_${SYCL_C_OR_CXX}_OUTPUT_EXTENSION})
@@ -268,16 +278,14 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
 
   set(SYCL_compile_definitions "$<TARGET_PROPERTY:${sycl_target},COMPILE_DEFINITIONS>")
 
-  SYCL_GET_SOURCES_AND_OPTIONS(_SYCL_wrap_sources _SYCL_wrap_cmake_options __SYCL_wrap_options ${_argn_list})
   set(_SYCL_build_shared_libs FALSE)
-
-  list(FIND _SYCL_wrap_cmake_options SHARED _SYCL_found_SHARED)
-  list(FIND _SYCL_wrap_cmake_options MODULE _SYCL_found_MODULE)
+  list(FIND _cmake_options SHARED _SYCL_found_SHARED)
+  list(FIND _cmake_options MODULE _SYCL_found_MODULE)
   if(_SYCL_found_SHARED GREATER -1 OR _SYCL_found_MODULE GREATER -1)
     set(_SYCL_build_shared_libs TRUE)
   endif()
   # STATIC
-  list(FIND _SYCL_wrap_cmake_options STATIC _SYCL_found_STATIC)
+  list(FIND _cmake_options STATIC _SYCL_found_STATIC)
   if(_SYCL_found_STATIC GREATER -1)
     set(_SYCL_build_shared_libs FALSE)
   endif()
@@ -294,7 +302,7 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
 
   # Reset the output variable
   set(_SYCL_wrap_generated_files "")
-  foreach(file ${_argn_list})
+  foreach(file ${sources})
     get_source_file_property(_is_header ${file} HEADER_FILE_ONLY)
     # SYCL kernels are in .cpp file
     if((${file} MATCHES "\\.cpp$") AND NOT _is_header)
@@ -399,24 +407,20 @@ endfunction()
 # Custom Intermediate Link
 ###############################################################################
 
-# Compute the filename to be used by SYCL_INTERMEDIATE_LINK_OBJECTS
-function(SYCL_COMPUTE_INTERMEDIATE_LINK_OBJECT_FILE_NAME output_file_var sycl_target object_files)
-  if (object_files)
-    set(generated_extension ${CMAKE_${SYCL_C_OR_CXX}_OUTPUT_EXTENSION})
-    set(output_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${sycl_target}.dir/${CMAKE_CFG_INTDIR}/${sycl_target}_intermediate_link${generated_extension}")
-  else()
-    set(output_file)
-  endif()
-
+# Compute the filename to be used by SYCL_LINK_OBJECTS
+function(SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME output_file_var sycl_target suffix)
+  set(output_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${sycl_target}.dir/${CMAKE_CFG_INTDIR}/${sycl_target}${suffix}")
   set(${output_file_var} "${output_file}" PARENT_SCOPE)
 endfunction()
 
 # Setup the build rule for the separable compilation intermediate link file.
-function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target _cmake_options options object_files)
+function(SYCL_LINK_OBJECTS output_file sycl_target cpp_objects_tgt sycl_objects)
+  set(object_files)
+  list(APPEND object_files ${sycl_objects})
+  list(APPEND object_files $<TARGET_OBJECTS:${cpp_objects_tgt}>)
   if (object_files)
     set(important_host_flags)
     _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
-    set(link_type_flag "-shared") # archive only without desiding linkage statically
     set(SYCL_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_LINK_FLAGS})
 
     list(APPEND SYCL_link_flags "$<TARGET_PROPERTY:${sycl_target},LINK_LIBRARIES_FLAGS>")
@@ -449,7 +453,7 @@ function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target _cmake_options o
       INPUT "${custom_target_script_pregen}"
       )
 
-    set(main_dep MAIN_DEPENDENCY ${object_files})
+    set(main_dep MAIN_DEPENDENCY ${sycl_objects})
 
     if(SYCL_VERBOSE_BUILD)
       set(verbose_output ON)
@@ -478,13 +482,56 @@ function(SYCL_INTERMEDIATE_LINK_OBJECTS output_file sycl_target _cmake_options o
         -D "output_file:STRING=${output_file}"
         -P "${custom_target_script}"
       WORKING_DIRECTORY "${working_directory}"
-      COMMENT "Building SYCL intermediate link file ${output_file_relative_path}"
+      COMMENT "Building SYCL link file ${output_file_relative_path}"
       )
   endif()
 endfunction()
 
+macro(get_full_name_library_link_options _options full_name)
+  set(_link_options "")
+  get_filename_component(path ${full_name} DIRECTORY)
+  get_filename_component(soname ${full_name} NAME)
+  set(_link_options ${_link_options} "-L${path}")
+  set(_link_options ${_link_options} "-l:${soname}")
+  set(${_options} ${_link_options})
+endmacro()
+
+macro(get_static_shared_library_link_options _options tgt)
+  set(_link_options "")
+  get_property(path TARGET ${tgt} PROPERTY LIBRARY_OUTPUT_DIRECTORY)
+  get_property(lib_name TARGET ${tgt} PROPERTY NAME)
+  set(_link_options ${_link_options} "-L${path}")
+  set(_link_options ${_link_options} "-l${lib_name}")
+  set(${_options} ${_link_options})
+endmacro()
+
+macro(get_interface_library_link_options _options tgt)
+  set(_link_options "")
+  get_property(_imported TARGET ${tgt} PROPERTY INTERFACE_LINK_LIBRARIES)
+  if(TARGET ${_imported})
+    get_property(type TARGET ${imported_tgt} PROPERTY TYPE)
+    if(${type} MATCHES STATIC_LIBRARY OR ${type} MATCHES SHARED_LIBRARY)
+      get_static_shared_library_link_options(_imported_link_options ${_imported})
+      set(_link_options ${_imported_link_options})
+    elseif()
+      message(FATAL_ERROR "sycl_target_link_libraries doesn't support transitive INTERFACE targets")
+    endif()
+  elseif(EXISTS ${_imported})
+    get_full_name_library_link_options(_fname_link_options ${_imported})
+    set(_link_options ${_fname_link_options})
+  elseif(NOT ${_imported} STREQUAL "")
+    # command
+    set(_link_options "${_imported}")
+  endif()
+  set(${_options} ${_link_options})
+endmacro()
+
 ###############################################################################
 # TARGET LINK LIBRARIES
+#
+# Preprocess linkage information to produce linkage options ahead of generation
+# time, since cannot parse/deduce it from result of generator expression
+# $<TARGET_PROPERTY:tgt,LINK_LIBRARIES> at generation time.
 #
 # Supported: full name library, STATIC_LIBRARY/SHARED_LIBRARY target and command.
 # The helper does not support intereface mode KEYWORD.
@@ -497,28 +544,38 @@ macro(SYCL_TARGET_LINK_LIBRARIES target)
       # target
       get_property(type TARGET ${lib} PROPERTY TYPE)
       if(${type} MATCHES STATIC_LIBRARY OR ${type} MATCHES SHARED_LIBRARY)
-        get_property(lib_name TARGET ${lib} PROPERTY NAME)
-        set(link_libraries_flags ${link_libraries_flags} "-l${lib_name}")
+        get_static_shared_library_link_options(_static_shared_library_link_options ${lib})
+        set(link_libraries_flags
+          ${link_libraries_flags}
+          ${_static_shared_library_link_options})
+        set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
+        get_property(sub_libs TARGET ${lib} PROPERTY INTERFACE_LINK_LIBRARIES)
+        sycl_target_link_libraries(${target} ${sub_libs})
+      elseif(${type} MATCHES INTERFACE_LIBRARY)
+        get_interface_library_link_options(_imported_link_options ${lib})
+        set(link_libraries_flags ${link_libraries_flags} ${_imported_link_options})
+        set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
       else()
-        message(FATAL_ERROR "SYCL_TARGET_LINK_LIBRARIES doesn't support target types except for STATIC_LIBRARY and SHARED_LIBRARY")
+        message(FATAL_ERROR "SYCL_TARGET_LINK_LIBRARIES doesn't support target types except for STATIC|SHARED|INTERFACE")
       endif()
     elseif(EXISTS ${lib})
-      # library
-      get_filename_component(path ${lib} DIRECTORY)
-      get_filename_component(full_name ${lib} NAME)
-      set(link_libraries_flags ${link_libraries_flags} "-L${path}")
-      set(link_libraries_flags ${link_libraries_flags} "-l:${full_name}")
+      # full name
+      get_full_name_library_link_options(_fname_link_options ${lib})
+      set(link_libraries_flags ${link_libraries_flags} ${_fname_link_options})
+      set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
     elseif(NOT ${lib} STREQUAL "")
       # command
-      set(link_libraries_flags ${link_libraries_flags} "${lib}")
+      set(link_libraries_flags ${link_libraries_flags} ${lib})
+      set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
     endif()
   endforeach()
-  set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
 endmacro()
 
 ###############################################################################
 # ADD LIBRARY
-# _cmake_options: STATIC or SHARED only
+# Return an imported library target to wrap a library binary produced
+# by cmake custom command (sycl compiler command)
+# _cmake_options: SHARED only
 ###############################################################################
 macro(SYCL_ADD_LIBRARY sycl_target)
 
@@ -563,43 +620,49 @@ macro(SYCL_ADD_LIBRARY sycl_target)
 endmacro()
 
 ###############################################################################
+# INSTALL EXECUTABLE
+# Install an imported executable target produced by SYCL_ADD_EXECUTABLE
+###############################################################################
+macro(SYCL_EXECUTABLE_TARGET_INSTALL sycl_target)
+  install(
+    FILES $<TARGET_FILE:${sycl_target}>
+    PERMISSIONS OWNER_EXECUTE
+    DESTINATION bin)
+endmacro()
+
+###############################################################################
 # ADD EXECUTABLE
+# Return an imported executable target to wrap an executable binary produced
+# by cmake custom command (sycl compiler command)
+# sycl_add_executable(
+#   <target_name>
+#   [SYCL_SOURCES <sycl_sources>...]
+#   [CPP_SOURCES <sycl_sources>...])
 ###############################################################################
 macro(SYCL_ADD_EXECUTABLE sycl_target)
 
   # Separate the sources from the options
-  SYCL_GET_SOURCES_AND_OPTIONS(_sources _cmake_options _options ${ARGN})
+  SYCL_GET_SOURCES_AND_OPTIONS(_sycl_sources _cpp_sources _cmake_options ${ARGN})
 
-  # Create custom commands and targets for each file.
-  SYCL_WRAP_SRCS( ${sycl_target} OBJ _generated_files ${_sources} OPTIONS ${_options} )
+  # Compile sycl sources
+  SYCL_WRAP_SRCS( ${sycl_target} ${sycl_target}_sycl_objects _cmake_options ${_sycl_sources} )
+
+  # Compile cpp sources
+  add_library(cpp_objects OBJECT ${_cpp_sources})
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_INTERMEDIATE_LINK_OBJECT_FILE_NAME(
-    link_file
-    ${sycl_target}
-    "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}"
-    )
+  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_exe_file ${sycl_target} "")
 
-  # Add the executable.
-  add_executable(${sycl_target} ${_cmake_options}
-    ${_generated_files}
-    ${_sources}
-    ${link_file}
-    )
+  # Add a custom linkage command
+  SYCL_LINK_OBJECTS(${imported_exe_file} ${sycl_target} cpp_objects ${${sycl_target}_sycl_objects})
 
-  # Add a link phase for custom linkage command
-  SYCL_INTERMEDIATE_LINK_OBJECTS("${link_file}" ${sycl_target} "${_options}" "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}")
+  # Add the executable, before custom linkage.
+  # add_executable(${sycl_target} ${imported_exe_file})
+  add_executable(${sycl_target} IMPORTED GLOBAL)
+  add_dependencies(${sycl_target} ${imported_exe_file})
+  set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_exe_file}")
 
-  target_link_libraries(${sycl_target} ${SYCL_LINK_LIBRARIES_KEYWORD}
-    ${SYCL_LIBRARIES}
-    )
-
-  # We need to set the linker language based on what the expected generated file
-  # would be.
-  set_target_properties(${sycl_target}
-    PROPERTIES
-    LINKER_LANGUAGE ${SYCL_C_OR_CXX}
-    )
+  sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
 
 endmacro()

@@ -45,7 +45,7 @@ endif()
 
 set(CMAKE_COMMAND "@CMAKE_COMMAND@") # path
 set(SYCL_executable "@SYCL_EXECUTABLE@") # path
-set(object_files "@object_files@") # list
+set(object_files [==[@object_files@]==]) # list
 set(SYCL_link_flags [==[@SYCL_link_flags@]==]) # list
 set(SYCL_target_compiler_flags "@SYCL_target_compiler_flags@") # list
 

@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <gtest/gtest.h>
-#include "simple_sycl_kernel.hpp"
+#include "simple_kernel.hpp"
 
 TEST(SYCLBuildingSysTest, SimpleKernelExecution) {
   int numel = 1024;
