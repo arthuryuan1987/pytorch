@@ -408,17 +408,22 @@ endfunction()
 ###############################################################################
 
 # Compute the filename to be used by SYCL_LINK_OBJECTS
-function(SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME output_file_var sycl_target suffix)
-  set(output_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${sycl_target}.dir/${CMAKE_CFG_INTDIR}/${sycl_target}${suffix}")
+function(SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME output_file_var sycl_target prefix suffix)
+  set(output_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${sycl_target}.dir/${CMAKE_CFG_INTDIR}/${prefix}${sycl_target}${suffix}")
   set(${output_file_var} "${output_file}" PARENT_SCOPE)
 endfunction()
 
 # Setup the build rule for the separable compilation intermediate link file.
-function(SYCL_LINK_OBJECTS output_file sycl_target cpp_objects_tgt sycl_objects)
+function(SYCL_LINK_OBJECTS output_file sycl_target _cmake_options cpp_objects_tgt sycl_objects)
   set(object_files)
   list(APPEND object_files ${sycl_objects})
   list(APPEND object_files $<TARGET_OBJECTS:${cpp_objects_tgt}>)
   if (object_files)
+    set(SYCL_link_flags)
+    if(_cmake_options MATCHES SHARED)
+      list(APPEND SYCL_link_flags "-shared")
+    endif()
+
     set(important_host_flags)
     _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
     set(SYCL_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_LINK_FLAGS})
@@ -572,50 +577,69 @@ macro(SYCL_TARGET_LINK_LIBRARIES target)
 endmacro()
 
 ###############################################################################
+# INSTALL EXECUTABLE
+# Install an imported executable target produced by SYCL_ADD_EXECUTABLE
+###############################################################################
+macro(SYCL_INSTALL_LIBRARY_TARGET sycl_target)
+  get_property(from TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION)
+  install(
+    FILES ${from}
+    PERMISSIONS OWNER_EXECUTE
+    ${ARGN})
+endmacro()
+
+###############################################################################
 # ADD LIBRARY
 # Return an imported library target to wrap a library binary produced
-# by cmake custom command (sycl compiler command)
+# by add_custom_command
 # _cmake_options: SHARED only
 ###############################################################################
 macro(SYCL_ADD_LIBRARY sycl_target)
 
   # Separate the sources from the options
-  SYCL_GET_SOURCES_AND_OPTIONS(_sources _cmake_options _options ${ARGN})
+  SYCL_GET_SOURCES_AND_OPTIONS(
+    _sycl_sources
+    _cpp_sources
+    _cmake_options
+    ${ARGN})
 
-  # Create custom commands and targets for each file.
+  if(NOT "${_cmake_options}" STREQUAL "" AND NOT ${_cmake_options} MATCHES SHARED)
+    message(FATAL_ERROR "SYCL_ADD_LIBRARY supports SHARED library only.")
+  endif()
+
+  # Compile sycl sources
   SYCL_WRAP_SRCS(
     ${sycl_target}
-    generated_files
-    ${_sources}
-    ${_cmake_options}
-    OPTIONS ${_options}
-    )
+    ${sycl_target}_lib_sycl_objects
+    SHARED
+    ${_sycl_sources})
+
+  # Compile cpp sources
+  add_library(lib_cpp_objects OBJECT ${_cpp_sources})
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_INTERMEDIATE_LINK_OBJECT_FILE_NAME(
-    link_file
+  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_lib_file ${sycl_target} "lib" ".so")
+
+  # Add a custom linkage command
+  SYCL_LINK_OBJECTS(
+    ${imported_lib_file}
     ${sycl_target}
-    "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}"
-    )
+    SHARED
+    lib_cpp_objects
+    ${${sycl_target}_lib_sycl_objects})
+
+  add_custom_target(
+    ${sycl_target}_trigger_building_rule
+    DEPEND ${imported_lib_file})
 
   # Create library target.
-  add_library(${sycl_target} ${_cmake_options} ${link_file})
+  add_library(${sycl_target} INTERFACE IMPORTED GLOBAL)
+  add_dependencies(${sycl_target} ${sycl_target}_trigger_building_rule)
+  set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_lib_file}")
+  set_property(TARGET ${sycl_target} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${imported_lib_file})
 
-  # Add a link phase for custom linkage command
-  # To generate target binary code on linkage
-  SYCL_INTERMEDIATE_LINK_OBJECTS("${link_file}" ${sycl_target} ${_cmake_options} "${_options}" "${${sycl_target}_INTERMEDIATE_LINK_OBJECTS}")
-
-  target_link_libraries(${sycl_target} ${SYCL_LINK_LIBRARIES_KEYWORD}
-    ${SYCL_LIBRARIES}
-    )
-
-  # We need to set the linker language based on what the expected generated file
-  # would be.
-  set_target_properties(${sycl_target}
-    PROPERTIES
-    LINKER_LANGUAGE ${SYCL_C_OR_CXX}
-    )
+  sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
 
 endmacro()
 
@@ -623,17 +647,17 @@ endmacro()
 # INSTALL EXECUTABLE
 # Install an imported executable target produced by SYCL_ADD_EXECUTABLE
 ###############################################################################
-macro(SYCL_EXECUTABLE_TARGET_INSTALL sycl_target)
+macro(SYCL_INSTALL_EXECUTABLE_TARGET sycl_target)
   install(
     FILES $<TARGET_FILE:${sycl_target}>
     PERMISSIONS OWNER_EXECUTE
-    DESTINATION bin)
+    ${ARGN})
 endmacro()
 
 ###############################################################################
 # ADD EXECUTABLE
 # Return an imported executable target to wrap an executable binary produced
-# by cmake custom command (sycl compiler command)
+# by add_custom_command
 # sycl_add_executable(
 #   <target_name>
 #   [SYCL_SOURCES <sycl_sources>...]
@@ -642,23 +666,34 @@ endmacro()
 macro(SYCL_ADD_EXECUTABLE sycl_target)
 
   # Separate the sources from the options
-  SYCL_GET_SOURCES_AND_OPTIONS(_sycl_sources _cpp_sources _cmake_options ${ARGN})
+  SYCL_GET_SOURCES_AND_OPTIONS(
+    _sycl_sources
+    _cpp_sources
+    _cmake_options
+    ${ARGN})
 
   # Compile sycl sources
-  SYCL_WRAP_SRCS( ${sycl_target} ${sycl_target}_sycl_objects _cmake_options ${_sycl_sources} )
+  SYCL_WRAP_SRCS(
+    ${sycl_target}
+    ${sycl_target}_exe_sycl_objects
+    _cmake_options
+    ${_sycl_sources})
 
   # Compile cpp sources
-  add_library(cpp_objects OBJECT ${_cpp_sources})
+  add_library(exe_cpp_objects OBJECT ${_cpp_sources})
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_exe_file ${sycl_target} "")
+  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_exe_file ${sycl_target} "" "")
 
   # Add a custom linkage command
-  SYCL_LINK_OBJECTS(${imported_exe_file} ${sycl_target} cpp_objects ${${sycl_target}_sycl_objects})
+  SYCL_LINK_OBJECTS(
+    ${imported_exe_file}
+    ${sycl_target}
+    _cmake_options
+    exe_cpp_objects
+    ${${sycl_target}_exe_sycl_objects})
 
-  # Add the executable, before custom linkage.
-  # add_executable(${sycl_target} ${imported_exe_file})
   add_executable(${sycl_target} IMPORTED GLOBAL)
   add_dependencies(${sycl_target} ${imported_exe_file})
   set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_exe_file}")
