@@ -1315,10 +1315,10 @@ if(USE_XPU)
     # # -- Host flags (SYCL_CXX_FLAGS)
     # Combine with torch_compile_options
     list(APPEND SYCL_HOST_FLAGS -fPIC)
-    list(APPEND SYCL_HOST_FLAGS -Wno-shift-count-negative)
-    list(APPEND SYCL_HOST_FLAGS -Wno-shift-count-overflow)
-    list(APPEND SYCL_HOST_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND SYCL_HOST_FLAGS -std=c++17)
+    # SYCL headers warnings
+    list(APPEND SYCL_HOST_FLAGS -Wno-deprecated-declarations)
+    list(APPEND SYCL_HOST_FLAGS -Wno-attributes)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND SYCL_HOST_FLAGS -g2)
