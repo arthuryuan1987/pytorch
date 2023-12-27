@@ -368,7 +368,7 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files _cmake_options sources)
       add_custom_command(
         OUTPUT ${generated_file}
         # These output files depend on the source_file and the contents of cmake_dependency_file
-        MAIN_DEPENDENCY ${main_dep}
+        ${main_dep}
         DEPENDS ${SYCL_DEPEND}
         DEPENDS ${custom_target_script}
         # Make sure the output directory exists before trying to write to it.
@@ -414,21 +414,23 @@ function(SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME output_file_var sycl_target pref
 endfunction()
 
 # Setup the build rule for the separable compilation intermediate link file.
-function(SYCL_LINK_OBJECTS output_file sycl_target _cmake_options cpp_objects_tgt sycl_objects custom_option)
+macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_imported _cmake_options cpp_objects_tgt sycl_objects custom_option)
   set(object_files)
   list(APPEND object_files ${sycl_objects})
-  list(APPEND object_files $<TARGET_OBJECTS:${cpp_objects_tgt}>)
+  if(TARGET ${cpp_objects_tgt})
+    list(APPEND object_files $<TARGET_OBJECTS:${cpp_objects_tgt}>)
+  endif()
   if (object_files)
     set(SYCL_link_flags)
-    if(_cmake_options MATCHES SHARED)
-      list(APPEND SYCL_link_flags "-shared")
-    endif()
-
     set(important_host_flags)
     _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
     set(SYCL_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_LINK_FLAGS})
 
     list(APPEND SYCL_link_flags "$<TARGET_PROPERTY:${sycl_target},LINK_LIBRARIES_FLAGS>")
+
+    if(${_cmake_options} MATCHES SHARED)
+      list(APPEND SYCL_link_flags "-shared")
+    endif()
 
     set(SYCL_target_compiler_flags "")
     foreach(flag ${SYCL_TARGET_COMPILER_FLAGS})
@@ -474,9 +476,9 @@ function(SYCL_LINK_OBJECTS output_file sycl_target _cmake_options cpp_objects_tg
     # Build the generated file and dependency file ##########################
     if(${custom_option} MATCHES CUSTOM_TARGET)
       add_custom_target(
-        ${sycl_target}
+        ${sycl_target_imported}
         BYPRODUCTS ${output_file}
-        DEPENDS ${sycl_objects}
+        DEPENDS ${object_files}
         DEPENDS ${SYCL_DEPEND}
         DEPENDS ${custom_target_script}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${generated_file_path}"
@@ -505,7 +507,7 @@ function(SYCL_LINK_OBJECTS output_file sycl_target _cmake_options cpp_objects_tg
         )
     endif()
   endif()
-endfunction()
+endmacro()
 
 macro(get_full_name_library_link_options _options full_name)
   set(_link_options "")
@@ -599,7 +601,6 @@ macro(SYCL_INSTALL_LIBRARY_TARGET sycl_target)
   get_property(from TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION)
   install(
     FILES ${from}
-    PERMISSIONS OWNER_EXECUTE
     ${ARGN})
 endmacro()
 
@@ -625,30 +626,35 @@ macro(SYCL_ADD_LIBRARY sycl_target)
   # Compile sycl sources
   SYCL_WRAP_SRCS(
     ${sycl_target}
-    ${sycl_target}_lib_sycl_objects
+    ${sycl_target}_sycl_objects
     SHARED
     ${_sycl_sources})
 
   # Compile cpp sources
-  add_library(lib_cpp_objects OBJECT ${_cpp_sources})
+  set(${sycl_target}_cpp_objects_tgt)
+  if(${_cpp_sources})
+    add_library(${sycl_target}_cpp_objects_tgt OBJECT ${_cpp_sources})
+    set_property(TARGET ${sycl_target}_cpp_objects_tgt PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_lib_file ${sycl_target} "lib" ".so")
+  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_file ${sycl_target} "lib" ".so")
 
   # Add a custom linkage target
   SYCL_LINK_OBJECTS(
-    ${imported_lib_file}
+    ${imported_file}
+    ${sycl_target}
     ${sycl_target}_intermediate
     SHARED
-    lib_cpp_objects
-    ${${sycl_target}_lib_sycl_objects}
+    ${sycl_target}_cpp_objects_tgt
+    ${${sycl_target}_sycl_objects}
     CUSTOM_TARGET)
 
   # Create library target.
-  add_library(${sycl_target} INTERFACE ${imported_lib_file})
-  # set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_lib_file}")
-  # set_property(TARGET ${sycl_target} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${imported_lib_file})
+  add_library(${sycl_target} INTERFACE ${imported_file})
+  set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_file}")
+  set_property(TARGET ${sycl_target} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${imported_file})
 
   sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
 
@@ -668,7 +674,7 @@ endmacro()
 ###############################################################################
 # ADD EXECUTABLE
 # Return an imported executable target to wrap an executable binary produced
-# by add_custom_command
+# by add_custom_target
 # sycl_add_executable(
 #   <target_name>
 #   [SYCL_SOURCES <sycl_sources>...]
@@ -686,29 +692,38 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
   # Compile sycl sources
   SYCL_WRAP_SRCS(
     ${sycl_target}
-    ${sycl_target}_exe_sycl_objects
+    ${sycl_target}_sycl_objects
     _cmake_options
     ${_sycl_sources})
 
   # Compile cpp sources
-  add_library(exe_cpp_objects OBJECT ${_cpp_sources})
+  set(${sycl_target}_cpp_objects_tgt)
+  if(${_cpp_sources})
+    add_library(${sycl_target}_cpp_objects_tgt OBJECT ${_cpp_sources})
+  endif()
+
+  # set(test_object_files)
+  # list(APPEND test_object_files ${${sycl_objects}_exe_sycl_objects})
+  # list(APPEND test_object_files $<TARGET_OBJECTS:${sycl_target}_exe_cpp_objects_tgt>)
+  # add_executable(${sycl_target}_test ${test_object_files})
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_exe_file ${sycl_target} "" "")
+  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_file ${sycl_target} "" "")
 
-  # Add a custom linkage command
+  # Add a custom linkage command to produce an imported executable file.
   SYCL_LINK_OBJECTS(
-    ${imported_exe_file}
+    ${imported_file}
     ${sycl_target}
+    ${sycl_target}_intermediate
     _cmake_options
-    exe_cpp_objects
-    ${${sycl_target}_exe_sycl_objects}
-    CUSTOM_COMMAND)
+    ${sycl_target}_cpp_objects_tgt
+    ${${sycl_target}_sycl_objects}
+    CUSTOM_TARGET)
 
   add_executable(${sycl_target} IMPORTED GLOBAL)
-  add_dependencies(${sycl_target} ${imported_exe_file})
-  set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_exe_file}")
+  add_dependencies(${sycl_target} ${sycl_target}_imported)
+  set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_file}")
 
   sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
 endmacro()
