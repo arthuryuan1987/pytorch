@@ -27,46 +27,28 @@
 #
 #  SYCL_LIBRARY_DIR
 #  -- Include directory for SYCL compiler/runtime libraries.
-#
-#  SYCL_LINK_LIBRARIES_KEYWORD
-#  -- Config KEYWORD of TARGET_LINK_LIBRARIES for SYCL_LIBRARIES
 
 # Helpers::
 #
 #  SYCL_ADD_EXECUTABLE
-#  -- Helper to define a cmake executable target. All involed .cpp files
-#     are compiled and linked by SYCL compiler.
+#  -- See the macro's comments for details.
 #
 #  SYCL_ADD_LIBRARY
-#  -- Helper to define a cmake library target. All involed .cpp files
-#     are compiled and linked by SYCL compiler.
+#  -- See the macro's comments for details.
 #
-#  SYCL_ADD_LIBRARY
-#  -- Helper to define a cmake library target. All involed .cpp files
-#     are compiled and linked by SYCL compiler.
+#  SYCL_TARGET_LINK_LIBRARIES
+#  -- See the macro's comments for detials.
+#
+#  SYCL_INSTALL_LIBRARY_TARGET
+#  -- Install a library target produced by ``SYCL_ADD_LIBRARY``.
+#
+#  SYCL_INSTALL_EXECUTABLE_TARGET
+#  -- Install an executable target produced by ``SYCL_ADD_EXECUTABLE``.
 #
 #  SYCL_INCLUDE_DIRECTORIES
 #  -- Helper to add user specified include directories. Added include
 #     directories will be referenced in compile command line of following
 #     ``SYCL_ADD_EXECUTABLE`` or ``SYCL_ADD_LIBRARY``.
-
-# Exmpale::
-# The helpers cannot distinguish SYCL kernel inlined sources and
-# host only sources, since all sources' name are suffixed with .cpp.
-# We still recommend user to compile host only sources with
-# ``CAMKE_CXX_COMPILER`` and to compile SYCL kernel inlined sources with
-# ``SYCL_COMPILER``. So there is something to do from caller side.
-#
-#  # Example to build a shared library
-#
-#  # Define a static library for SYCL kernel inlined sources.
-#  sycl_add_library(your_target_kernel STARTIC ${SYCL_KERNEL_SRCS})
-#
-#  # Define your target 
-#  add_library(your_target SHARED ${HOST_ONLY_SRCS})
-#
-#  # Define linkage for your_target_kernel
-#  target_link_libraries(your_target your_target_kernel)
 
 # The MIT License
 #
@@ -92,8 +74,8 @@
 
 
 ###############################################################################
-# Helpers of SYCL_ADD_LIBRARY.
-# Use Intel SYCL compiler to build .cpp containing SYCL kernels.
+# Helpers of SYCL_ADD_LIBRARY and SYCL_ADD_EXECUTABLE.
+# Use SYCL compiler to build .cpp containing SYCL kernels.
 
 # This macro helps us find the location of helper files we will need the full path to
 macro(SYCL_FIND_HELPER_FILE _name _extension)
@@ -167,6 +149,7 @@ endmacro()
 
 ###############################################################################
 # Add include directories to pass to the sycl compiler command.
+##############################################################################
 macro(SYCL_INCLUDE_DIRECTORIES)
   foreach(dir ${ARGN})
     list(APPEND SYCL_INCLUDE_DIRS_USER ${dir})
@@ -192,8 +175,10 @@ macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cpp_sources _cmake_options)
       set( _found_sycl_sources FALSE )
       set( _found_cpp_sources FALSE )
     elseif(
+        "x${arg}" STREQUAL "xEXCLUDE_FROM_ALL" OR
         "x${arg}" STREQUAL "xSTATIC" OR
-        "x${arg}" STREQUAL "xSHARED"
+        "x${arg}" STREQUAL "xSHARED" OR
+        "x${arg}" STREQUAL "xMODULE"
         )
       list(APPEND ${_cmake_options} ${arg})
     elseif("x${arg}" STREQUAL "xSYCL_SOURCES")
@@ -222,6 +207,7 @@ endmacro()
 # add this path when there is a conflict, since by the time a second collision
 # in names is detected it's already too late to fix the first one.  For
 # consistency sake the relative path will be added to all files.
+##############################################################################
 function(SYCL_COMPUTE_BUILD_PATH path build_path)
   # Only deal with CMake style paths from here on out
   file(TO_CMAKE_PATH "${path}" bpath)
@@ -413,8 +399,7 @@ function(SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME output_file_var sycl_target pref
   set(${output_file_var} "${output_file}" PARENT_SCOPE)
 endfunction()
 
-# Setup the build rule for the separable compilation intermediate link file.
-macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_intermediate _cmake_options cpp_objects_tgt sycl_objects)
+macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_shadow _cmake_options cpp_objects_tgt sycl_objects)
   set(object_files)
   list(APPEND object_files ${sycl_objects})
   if(TARGET ${cpp_objects_tgt})
@@ -475,7 +460,7 @@ macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_intermediate _cmake_
 
     # Build the generated file and dependency file ##########################
     add_custom_target(
-      ${sycl_target_intermediate}
+      ${sycl_target_shadow}
       ALL
       BYPRODUCTS ${output_file}
       DEPENDS ${object_files}
@@ -536,10 +521,12 @@ endmacro()
 #
 # Preprocess linkage information to produce linkage options ahead of generation
 # time, since cannot parse/deduce it from result of generator expression
-# $<TARGET_PROPERTY:tgt,LINK_LIBRARIES> at generation time.
+# $<TARGET_PROPERTY:tgt,INTERFACE_LINK_LIBRARIES> at generation time.
 #
-# Supported: full name library, STATIC_LIBRARY/SHARED_LIBRARY target and command.
-# The helper does not support intereface mode KEYWORD.
+# Support full name library, ``STATIC_LIBRARY``|``SHARED_LIBRARY``|
+# ``INTERFACE_LIBRARY`` target and linkage option string.
+#
+# Inheriting transitive link dependencies is not supported.
 ###############################################################################
 macro(SYCL_TARGET_LINK_LIBRARIES target)
   get_property(link_libraries_flags TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS)
@@ -569,7 +556,7 @@ macro(SYCL_TARGET_LINK_LIBRARIES target)
       set(link_libraries_flags ${link_libraries_flags} ${_fname_link_options})
       set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
     elseif(NOT ${lib} STREQUAL "")
-      # command
+      # linkage option string
       set(link_libraries_flags ${link_libraries_flags} ${lib})
       set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
     endif()
@@ -577,8 +564,8 @@ macro(SYCL_TARGET_LINK_LIBRARIES target)
 endmacro()
 
 ###############################################################################
-# INSTALL EXECUTABLE
-# Install an imported executable target produced by SYCL_ADD_EXECUTABLE
+# INSTALL LIBRARY
+# Install a library target produced by ``SYCL_ADD_EXECUTABLE``
 ###############################################################################
 macro(SYCL_INSTALL_LIBRARY_TARGET sycl_target)
   get_property(from TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION)
@@ -589,9 +576,19 @@ endmacro()
 
 ###############################################################################
 # ADD LIBRARY
-# Return an imported library target to wrap a library binary produced
-# by add_custom_target
-# _cmake_options: SHARED only
+# Return an interface library target wrapping a library produced
+# by add_custom_target. Output library file can be found by
+# ``IMPORTED_LOCATION``. ``INTERFACE_LINK_LIBRARIES`` is set for the target.
+#
+# sycl_add_libraries(
+#   <target_name>
+#   [SYCL_SOURCES <sycl_sources>...]
+#   [CPP_SOURCES <sycl_sources>...])
+#
+# ``target_compile_options`` in subsequent is not supported.
+# ``target_include_directories`` in subsequent is not supported.
+# Only ``SHARED`` CMAKE option is supported. ``STATIC``|``INTERFACE`` and
+# other option are not supported.
 ###############################################################################
 macro(SYCL_ADD_LIBRARY sycl_target)
 
@@ -628,7 +625,7 @@ macro(SYCL_ADD_LIBRARY sycl_target)
   SYCL_LINK_OBJECTS(
     ${imported_file}
     ${sycl_target}
-    ${sycl_target}_intermediate
+    ${sycl_target}_shadow
     SHARED
     ${sycl_target}_cpp_objects_tgt
     ${${sycl_target}_sycl_objects})
@@ -644,7 +641,7 @@ endmacro()
 
 ###############################################################################
 # INSTALL EXECUTABLE
-# Install an imported executable target produced by SYCL_ADD_EXECUTABLE
+# Install an executable target produced by ``SYCL_ADD_EXECUTABLE``.
 ###############################################################################
 macro(SYCL_INSTALL_EXECUTABLE_TARGET sycl_target)
   set(permissions
@@ -663,12 +660,18 @@ endmacro()
 
 ###############################################################################
 # ADD EXECUTABLE
-# Return an imported executable target to wrap an executable binary produced
-# by add_custom_target
+# Return an imported executable target wrapping an executable produced
+# by add_custom_target. Output executable file can be found by
+# ``IMPORTED_LOCATION``.
+#
 # sycl_add_executable(
 #   <target_name>
 #   [SYCL_SOURCES <sycl_sources>...]
 #   [CPP_SOURCES <sycl_sources>...])
+#
+# ``target_compile_options`` in subsequent is not supported.
+# ``target_include_directories`` in subsequent is not supported.
+# CMAKE options (``IMPORTED``|``ALIAS``) are not supported.
 ###############################################################################
 macro(SYCL_ADD_EXECUTABLE sycl_target)
 
@@ -692,11 +695,6 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
     add_library(${sycl_target}_cpp_objects_tgt OBJECT ${_cpp_sources})
   endif()
 
-  # set(test_object_files)
-  # list(APPEND test_object_files ${${sycl_objects}_exe_sycl_objects})
-  # list(APPEND test_object_files $<TARGET_OBJECTS:${sycl_target}_exe_cpp_objects_tgt>)
-  # add_executable(${sycl_target}_test ${test_object_files})
-
   # Compute the file name of the intermedate link file used for separable
   # compilation.
   SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_file ${sycl_target} "" "")
@@ -705,13 +703,13 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
   SYCL_LINK_OBJECTS(
     ${imported_file}
     ${sycl_target}
-    ${sycl_target}_intermediate
+    ${sycl_target}_shadow
     _cmake_options
     ${sycl_target}_cpp_objects_tgt
     ${${sycl_target}_sycl_objects})
 
   add_executable(${sycl_target} IMPORTED GLOBAL)
-  add_dependencies(${sycl_target} ${sycl_target}_intermediate)
+  add_dependencies(${sycl_target} ${sycl_target}_shadow)
   set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_file}")
 
   sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
