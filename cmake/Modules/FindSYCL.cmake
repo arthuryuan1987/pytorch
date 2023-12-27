@@ -414,7 +414,7 @@ function(SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME output_file_var sycl_target pref
 endfunction()
 
 # Setup the build rule for the separable compilation intermediate link file.
-macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_imported _cmake_options cpp_objects_tgt sycl_objects custom_option)
+macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_intermediate _cmake_options cpp_objects_tgt sycl_objects)
   set(object_files)
   list(APPEND object_files ${sycl_objects})
   if(TARGET ${cpp_objects_tgt})
@@ -474,38 +474,21 @@ macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_imported _cmake_opti
     endif()
 
     # Build the generated file and dependency file ##########################
-    if(${custom_option} MATCHES CUSTOM_TARGET)
-      add_custom_target(
-        ${sycl_target_imported}
-        BYPRODUCTS ${output_file}
-        DEPENDS ${object_files}
-        DEPENDS ${SYCL_DEPEND}
-        DEPENDS ${custom_target_script}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${generated_file_path}"
-        COMMAND ${CMAKE_COMMAND} ARGS
-          -D verbose:BOOL=${verbose_output}
-          -D "output_file:STRING=${output_file}"
-          -P "${custom_target_script}"
-        WORKING_DIRECTORY "${working_directory}"
-        COMMENT "Building SYCL link file ${output_file_relative_path}"
-        )
-    elseif(${custom_option} MATCHES CUSTOM_COMMAND)
-      add_custom_command(
-        OUTPUT ${output_file}
-        # These output files depend on the source_file and the contents of cmake_dependency_file
-        MAIN_DEPENDENCY ${sycl_objects}
-        DEPENDS ${SYCL_DEPEND}
-        DEPENDS ${custom_target_script}
-        # Make sure the output directory exists before trying to write to it.
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${generated_file_path}"
-        COMMAND ${CMAKE_COMMAND} ARGS
-          -D verbose:BOOL=${verbose_output}
-          -D "output_file:STRING=${output_file}"
-          -P "${custom_target_script}"
-        WORKING_DIRECTORY "${working_directory}"
-        COMMENT "Building SYCL link file ${output_file_relative_path}"
-        )
-    endif()
+    add_custom_target(
+      ${sycl_target_intermediate}
+      ALL
+      BYPRODUCTS ${output_file}
+      DEPENDS ${object_files}
+      DEPENDS ${SYCL_DEPEND}
+      DEPENDS ${custom_target_script}
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${generated_file_path}"
+      COMMAND ${CMAKE_COMMAND} ARGS
+        -D verbose:BOOL=${verbose_output}
+        -D "output_file:STRING=${output_file}"
+        -P "${custom_target_script}"
+      WORKING_DIRECTORY "${working_directory}"
+      COMMENT "Building SYCL link file ${output_file_relative_path}"
+      )
   endif()
 endmacro()
 
@@ -632,7 +615,7 @@ macro(SYCL_ADD_LIBRARY sycl_target)
 
   # Compile cpp sources
   set(${sycl_target}_cpp_objects_tgt)
-  if(${_cpp_sources})
+  if(_cpp_sources)
     add_library(${sycl_target}_cpp_objects_tgt OBJECT ${_cpp_sources})
     set_property(TARGET ${sycl_target}_cpp_objects_tgt PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
@@ -648,8 +631,7 @@ macro(SYCL_ADD_LIBRARY sycl_target)
     ${sycl_target}_intermediate
     SHARED
     ${sycl_target}_cpp_objects_tgt
-    ${${sycl_target}_sycl_objects}
-    CUSTOM_TARGET)
+    ${${sycl_target}_sycl_objects})
 
   # Create library target.
   add_library(${sycl_target} INTERFACE ${imported_file})
@@ -665,9 +647,17 @@ endmacro()
 # Install an imported executable target produced by SYCL_ADD_EXECUTABLE
 ###############################################################################
 macro(SYCL_INSTALL_EXECUTABLE_TARGET sycl_target)
+  set(permissions
+    WORLD_EXECUTE
+    WORLD_READ
+    GROUP_EXECUTE
+    GROUP_READ
+    OWNER_EXECUTE
+    OWNER_READ
+    OWNER_WRITE)
   install(
     FILES $<TARGET_FILE:${sycl_target}>
-    PERMISSIONS OWNER_EXECUTE
+    PERMISSIONS ${permissions}
     ${ARGN})
 endmacro()
 
@@ -698,7 +688,7 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
 
   # Compile cpp sources
   set(${sycl_target}_cpp_objects_tgt)
-  if(${_cpp_sources})
+  if(_cpp_sources)
     add_library(${sycl_target}_cpp_objects_tgt OBJECT ${_cpp_sources})
   endif()
 
@@ -718,11 +708,10 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
     ${sycl_target}_intermediate
     _cmake_options
     ${sycl_target}_cpp_objects_tgt
-    ${${sycl_target}_sycl_objects}
-    CUSTOM_TARGET)
+    ${${sycl_target}_sycl_objects})
 
   add_executable(${sycl_target} IMPORTED GLOBAL)
-  add_dependencies(${sycl_target} ${sycl_target}_imported)
+  add_dependencies(${sycl_target} ${sycl_target}_intermediate)
   set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_file}")
 
   sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
