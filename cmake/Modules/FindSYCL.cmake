@@ -158,8 +158,7 @@ endmacro()
 
 
 ###############################################################################
-sycl_find_helper_file(run_compile cmake)
-sycl_find_helper_file(run_link cmake)
+sycl_find_helper_file(run_sycl cmake)
 
 ##############################################################################
 # Separate the OPTIONS out from the sources
@@ -327,7 +326,7 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files _cmake_options sources)
       set(SYCL_build_type "Device")
 
       # Configure the build script
-      configure_file("${SYCL_run_compile}" "${custom_target_script_pregen}" @ONLY)
+      configure_file("${SYCL_run_sycl}" "${custom_target_script_pregen}" @ONLY)
       file(GENERATE
         OUTPUT "${custom_target_script}"
         INPUT "${custom_target_script_pregen}"
@@ -393,38 +392,18 @@ endfunction()
 # Custom Intermediate Link
 ###############################################################################
 
-# Compute the filename to be used by SYCL_LINK_OBJECTS
-function(SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME output_file_var sycl_target prefix suffix)
-  set(output_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${sycl_target}.dir/${CMAKE_CFG_INTDIR}/${prefix}${sycl_target}${suffix}")
+# Compute the filename to be used by SYCL_LINK_DEVICE_OBJECTS
+function(SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME output_file_var sycl_target)
+  set(generated_extension ${CMAKE_${SYCL_C_OR_CXX}_OUTPUT_EXTENSION})
+  set(output_file "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${sycl_target}.dir/${CMAKE_CFG_INTDIR}/${sycl_target}_sycl_device_obj${generated_extension}")
   set(${output_file_var} "${output_file}" PARENT_SCOPE)
 endfunction()
 
-macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_shadow _cmake_options cpp_objects_tgt sycl_objects)
+macro(SYCL_LINK_DEVICE_OBJECTS output_file sycl_target sycl_objects)
   set(object_files)
   list(APPEND object_files ${sycl_objects})
-  if(TARGET ${cpp_objects_tgt})
-    list(APPEND object_files $<TARGET_OBJECTS:${cpp_objects_tgt}>)
-  endif()
+
   if (object_files)
-    set(SYCL_link_flags)
-    set(important_host_flags)
-    _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
-    set(SYCL_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_LINK_FLAGS})
-
-    list(APPEND SYCL_link_flags "$<TARGET_PROPERTY:${sycl_target},LINK_LIBRARIES_FLAGS>")
-
-    if(${_cmake_options} MATCHES SHARED)
-      list(APPEND SYCL_link_flags "-shared")
-    endif()
-
-    set(SYCL_target_compiler_flags "")
-    foreach(flag ${SYCL_TARGET_COMPILER_FLAGS})
-      string(APPEND SYCL_target_compiler_flags "${flag} ")
-    endforeach()
-
-    set(custom_target_script_pregen "${output_file}.cmake.pre-gen")
-    set(custom_target_script "${output_file}$<$<BOOL:$<CONFIG>>:.$<CONFIG>>.cmake")
-    set(cmake_dependency_file "${output_file}.depend")
 
     set_source_files_properties("${output_file}"
       PROPERTIES
@@ -433,17 +412,18 @@ macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_shadow _cmake_option
       GENERATED TRUE       # This file is generated during the build
       )
 
+    set(SYCL_device_link_flags)
+    set(important_host_flags)
+    _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
+    set(SYCL_device_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_FLAGS})
+
+    set(SYCL_target_compiler_flags "")
+    foreach(flag ${SYCL_TARGET_COMPILER_FLAGS})
+      string(APPEND SYCL_target_compiler_flags "${flag} ")
+    endforeach()
+
     file(REAL_PATH working_directory "${output_file}")
     file(RELATIVE_PATH output_file_relative_path "${CMAKE_BINARY_DIR}" "${output_file}")
-
-    SYCL_INCLUDE_DEPENDENCIES(${cmake_dependency_file})
-
-    # Configure the build script
-    configure_file("${SYCL_run_link}" "${custom_target_script_pregen}" @ONLY)
-    file(GENERATE
-      OUTPUT "${custom_target_script}"
-      INPUT "${custom_target_script_pregen}"
-      )
 
     if(SYCL_VERBOSE_BUILD)
       set(verbose_output ON)
@@ -459,19 +439,10 @@ macro(SYCL_LINK_OBJECTS output_file sycl_target sycl_target_shadow _cmake_option
     endif()
 
     # Build the generated file and dependency file ##########################
-    add_custom_target(
-      ${sycl_target_shadow}
-      ALL
-      BYPRODUCTS ${output_file}
+    add_custom_command(
+      OUTPUT ${output_file}
       DEPENDS ${object_files}
-      DEPENDS ${SYCL_DEPEND}
-      DEPENDS ${custom_target_script}
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${generated_file_path}"
-      COMMAND ${CMAKE_COMMAND} ARGS
-        -D verbose:BOOL=${verbose_output}
-        -D "output_file:STRING=${output_file}"
-        -P "${custom_target_script}"
-      WORKING_DIRECTORY "${working_directory}"
+      COMMAND ${SYCL_EXECUTABLE} -fsycl ${SYCL_device_link_flags} -fsycl-link ${object_files} -o ${output_file}
       COMMENT "Building SYCL link file ${output_file_relative_path}"
       )
   endif()
@@ -619,7 +590,7 @@ macro(SYCL_ADD_LIBRARY sycl_target)
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_file ${sycl_target} "lib" ".so")
+  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(link_file ${sycl_target} "lib" ".so")
 
   # Add a custom linkage target
   SYCL_LINK_OBJECTS(
@@ -678,7 +649,7 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
   # Separate the sources from the options
   SYCL_GET_SOURCES_AND_OPTIONS(
     _sycl_sources
-    _cpp_sources
+    _cxx_sources
     _cmake_options
     ${ARGN})
 
@@ -689,28 +660,22 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
     _cmake_options
     ${_sycl_sources})
 
-  # Compile cpp sources
-  set(${sycl_target}_cpp_objects_tgt)
-  if(_cpp_sources)
-    add_library(${sycl_target}_cpp_objects_tgt OBJECT ${_cpp_sources})
-  endif()
-
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(imported_file ${sycl_target} "" "")
+  SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
 
   # Add a custom linkage command to produce an imported executable file.
-  SYCL_LINK_OBJECTS(
-    ${imported_file}
+  SYCL_LINK_DEVICE_OBJECTS(
+    ${device_object}
     ${sycl_target}
-    ${sycl_target}_shadow
-    _cmake_options
-    ${sycl_target}_cpp_objects_tgt
     ${${sycl_target}_sycl_objects})
 
-  add_executable(${sycl_target} IMPORTED GLOBAL)
-  add_dependencies(${sycl_target} ${sycl_target}_shadow)
-  set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_file}")
+  add_executable(
+    ${sycl_target}
+    ${_cmake_options}
+    ${_cxx_sources}
+    ${${sycl_target}_sycl_objects}
+    ${device_object})
 
-  sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
+  target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
 endmacro()
