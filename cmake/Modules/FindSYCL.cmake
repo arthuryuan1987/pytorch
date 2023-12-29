@@ -35,20 +35,6 @@
 #
 #  SYCL_ADD_LIBRARY
 #  -- See the macro's comments for details.
-#
-#  SYCL_TARGET_LINK_LIBRARIES
-#  -- See the macro's comments for detials.
-#
-#  SYCL_INSTALL_LIBRARY_TARGET
-#  -- Install a library target produced by ``SYCL_ADD_LIBRARY``.
-#
-#  SYCL_INSTALL_EXECUTABLE_TARGET
-#  -- Install an executable target produced by ``SYCL_ADD_EXECUTABLE``.
-#
-#  SYCL_INCLUDE_DIRECTORIES
-#  -- Helper to add user specified include directories. Added include
-#     directories will be referenced in compile command line of following
-#     ``SYCL_ADD_EXECUTABLE`` or ``SYCL_ADD_LIBRARY``.
 
 # The MIT License
 #
@@ -96,7 +82,6 @@ endmacro()
 # SYCL_HOST_COMPILER
 set(SYCL_HOST_COMPILER "${CMAKE_CXX_COMPILER}"
   CACHE FILEPATH "Host side compiler used by SYCL")
-set(SYCL_INCLUDE_DIRS_USER "")
 
 # SYCL_EXECUTABLE
 if(SYCL_COMPILER)
@@ -146,16 +131,6 @@ endmacro()
 ###############################################################################
 # Macros
 ###############################################################################
-
-###############################################################################
-# Add include directories to pass to the sycl compiler command.
-##############################################################################
-macro(SYCL_INCLUDE_DIRECTORIES)
-  foreach(dir ${ARGN})
-    list(APPEND SYCL_INCLUDE_DIRS_USER ${dir})
-  endforeach()
-endmacro()
-
 
 ###############################################################################
 sycl_find_helper_file(run_sycl cmake)
@@ -260,7 +235,7 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files)
   set(SYCL_C_OR_CXX CXX)
   set(generated_extension ${CMAKE_${SYCL_C_OR_CXX}_OUTPUT_EXTENSION})
 
-  set(SYCL_include_dirs ${SYCL_INCLUDE_DIRS_USER} "${SYCL_INCLUDE_DIR}")
+  set(SYCL_include_dirs "${SYCL_INCLUDE_DIR}")
   list(APPEND SYCL_include_dirs "$<TARGET_PROPERTY:${sycl_target},INCLUDE_DIRECTORIES>")
 
   set(SYCL_compile_definitions "$<TARGET_PROPERTY:${sycl_target},COMPILE_DEFINITIONS>")
@@ -456,118 +431,10 @@ macro(SYCL_LINK_DEVICE_OBJECTS output_file sycl_target sycl_objects)
   endif()
 endmacro()
 
-macro(get_full_name_library_link_options _options full_name)
-  set(_link_options "")
-  get_filename_component(path ${full_name} DIRECTORY)
-  get_filename_component(soname ${full_name} NAME)
-  set(_link_options ${_link_options} "-L${path}")
-  set(_link_options ${_link_options} "-l:${soname}")
-  set(${_options} ${_link_options})
-endmacro()
-
-macro(get_static_shared_library_link_options _options tgt)
-  set(_link_options "")
-  get_property(path TARGET ${tgt} PROPERTY LIBRARY_OUTPUT_DIRECTORY)
-  get_property(lib_name TARGET ${tgt} PROPERTY NAME)
-  set(_link_options ${_link_options} "-L${path}")
-  set(_link_options ${_link_options} "-l${lib_name}")
-  set(${_options} ${_link_options})
-endmacro()
-
-macro(get_interface_library_link_options _options tgt)
-  set(_link_options "")
-  get_property(_imported TARGET ${tgt} PROPERTY INTERFACE_LINK_LIBRARIES)
-  if(TARGET ${_imported})
-    get_property(type TARGET ${imported_tgt} PROPERTY TYPE)
-    if(${type} MATCHES STATIC_LIBRARY OR ${type} MATCHES SHARED_LIBRARY)
-      get_static_shared_library_link_options(_imported_link_options ${_imported})
-      set(_link_options ${_imported_link_options})
-    elseif()
-      message(FATAL_ERROR "sycl_target_link_libraries doesn't support transitive INTERFACE targets")
-    endif()
-  elseif(EXISTS ${_imported})
-    get_full_name_library_link_options(_fname_link_options ${_imported})
-    set(_link_options ${_fname_link_options})
-  elseif(NOT ${_imported} STREQUAL "")
-    # command
-    set(_link_options "${_imported}")
-  endif()
-  set(${_options} ${_link_options})
-endmacro()
-
-###############################################################################
-# TARGET LINK LIBRARIES
-#
-# Preprocess linkage information to produce linkage options ahead of generation
-# time, since cannot parse/deduce it from result of generator expression
-# $<TARGET_PROPERTY:tgt,INTERFACE_LINK_LIBRARIES> at generation time.
-#
-# Support full name library, ``STATIC_LIBRARY``|``SHARED_LIBRARY``|
-# ``INTERFACE_LIBRARY`` target and linkage option string.
-#
-# Inheriting transitive link dependencies is not supported.
-###############################################################################
-macro(SYCL_TARGET_LINK_LIBRARIES target)
-  get_property(link_libraries_flags TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS)
-  set(libs ${ARGN})
-  foreach(lib ${libs})
-    if(TARGET ${lib})
-      # target
-      get_property(type TARGET ${lib} PROPERTY TYPE)
-      if(${type} MATCHES STATIC_LIBRARY OR ${type} MATCHES SHARED_LIBRARY)
-        get_static_shared_library_link_options(_static_shared_library_link_options ${lib})
-        set(link_libraries_flags
-          ${link_libraries_flags}
-          ${_static_shared_library_link_options})
-        set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
-        get_property(sub_libs TARGET ${lib} PROPERTY INTERFACE_LINK_LIBRARIES)
-        sycl_target_link_libraries(${target} ${sub_libs})
-      elseif(${type} MATCHES INTERFACE_LIBRARY)
-        get_interface_library_link_options(_imported_link_options ${lib})
-        set(link_libraries_flags ${link_libraries_flags} ${_imported_link_options})
-        set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
-      else()
-        message(FATAL_ERROR "SYCL_TARGET_LINK_LIBRARIES doesn't support target types except for STATIC|SHARED|INTERFACE")
-      endif()
-    elseif(EXISTS ${lib})
-      # full name
-      get_full_name_library_link_options(_fname_link_options ${lib})
-      set(link_libraries_flags ${link_libraries_flags} ${_fname_link_options})
-      set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
-    elseif(NOT ${lib} STREQUAL "")
-      # linkage option string
-      set(link_libraries_flags ${link_libraries_flags} ${lib})
-      set_property(TARGET ${target} PROPERTY LINK_LIBRARIES_FLAGS ${link_libraries_flags})
-    endif()
-  endforeach()
-endmacro()
-
-###############################################################################
-# INSTALL LIBRARY
-# Install a library target produced by ``SYCL_ADD_EXECUTABLE``
-###############################################################################
-macro(SYCL_INSTALL_LIBRARY_TARGET sycl_target)
-  get_property(from TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION)
-  install(
-    FILES ${from}
-    ${ARGN})
-endmacro()
-
 ###############################################################################
 # ADD LIBRARY
-# Return an interface library target wrapping a library produced
-# by add_custom_target. Output library file can be found by
-# ``IMPORTED_LOCATION``. ``INTERFACE_LINK_LIBRARIES`` is set for the target.
-#
-# sycl_add_libraries(
-#   <target_name>
-#   [SYCL_SOURCES <sycl_sources>...]
-#   [CPP_SOURCES <sycl_sources>...])
-#
 # ``target_compile_options`` in subsequent is not supported.
-# ``target_include_directories`` in subsequent is not supported.
-# Only ``SHARED`` CMAKE option is supported. ``STATIC``|``INTERFACE`` and
-# other option are not supported.
+# Keyword, ``STATIC``(static achivie library), is not supported.
 ###############################################################################
 macro(SYCL_ADD_LIBRARY sycl_target)
 
@@ -577,6 +444,10 @@ macro(SYCL_ADD_LIBRARY sycl_target)
     _cxx_sources
     _cmake_options
     ${ARGN})
+
+  if(_cmake_options MATCHES STATIC)
+    message(FATAL_ERROR "SYCL_ADD_LIBRARY doesn't support STATIC keyword ...")
+  endif()
 
   # Compile sycl sources
   SYCL_WRAP_SRCS(
@@ -588,13 +459,13 @@ macro(SYCL_ADD_LIBRARY sycl_target)
   # compilation.
   SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
 
-  # Add a custom linkage command to produce an imported executable file.
+  # Add a custom device linkage command to produce a host relocatable object
+  # containing device object module.
   SYCL_LINK_DEVICE_OBJECTS(
     ${device_object}
     ${sycl_target}
     ${${sycl_target}_sycl_objects})
 
-  # Create library target.
   add_library(
     ${sycl_target}
     ${_cmake_options}
@@ -612,38 +483,8 @@ macro(SYCL_ADD_LIBRARY sycl_target)
 endmacro()
 
 ###############################################################################
-# INSTALL EXECUTABLE
-# Install an executable target produced by ``SYCL_ADD_EXECUTABLE``.
-###############################################################################
-macro(SYCL_INSTALL_EXECUTABLE_TARGET sycl_target)
-  set(permissions
-    WORLD_EXECUTE
-    WORLD_READ
-    GROUP_EXECUTE
-    GROUP_READ
-    OWNER_EXECUTE
-    OWNER_READ
-    OWNER_WRITE)
-  install(
-    FILES $<TARGET_FILE:${sycl_target}>
-    PERMISSIONS ${permissions}
-    ${ARGN})
-endmacro()
-
-###############################################################################
 # ADD EXECUTABLE
-# Return an imported executable target wrapping an executable produced
-# by add_custom_target. Output executable file can be found by
-# ``IMPORTED_LOCATION``.
-#
-# sycl_add_executable(
-#   <target_name>
-#   [SYCL_SOURCES <sycl_sources>...]
-#   [CPP_SOURCES <sycl_sources>...])
-#
 # ``target_compile_options`` in subsequent is not supported.
-# ``target_include_directories`` in subsequent is not supported.
-# CMAKE options (``IMPORTED``|``ALIAS``) are not supported.
 ###############################################################################
 macro(SYCL_ADD_EXECUTABLE sycl_target)
 
@@ -664,7 +505,8 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
   # compilation.
   SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
 
-  # Add a custom linkage command to produce an imported executable file.
+  # Add a custom device linkage command to produce a host relocatable object
+  # containing device object module.
   SYCL_LINK_DEVICE_OBJECTS(
     ${device_object}
     ${sycl_target}
