@@ -13,14 +13,8 @@
 #  SYCL_FLAGS
 #  -- SYCL compiler's compilation command line arguments.
 #
-#  SYCL_LINK_FLAGS
-#  -- SYCL compiler's linkage command line arguments.
-#
 #  SYCL_HOST_FLAGS
 #  -- SYCL compiler's 3rd party host compiler (e.g. gcc) arguments .
-#
-#  SYCL_TARGET_COMPILER_FLAGS
-#  -- SYCL compiler's target compiler (e.g. igc) arguments.
 #
 #  SYCL_INCLUDE_DIR
 #  -- Include directory for SYCL compiler/runtime headers.
@@ -399,11 +393,6 @@ macro(SYCL_LINK_DEVICE_OBJECTS output_file sycl_target sycl_objects)
     set(important_host_flags)
     _sycl_get_important_host_flags(important_host_flags "${SYCL_HOST_FLAGS}")
     set(SYCL_device_link_flags ${link_type_flag} ${important_host_flags} ${SYCL_FLAGS})
-
-    set(SYCL_target_compiler_flags "")
-    foreach(flag ${SYCL_TARGET_COMPILER_FLAGS})
-      string(APPEND SYCL_target_compiler_flags "${flag} ")
-    endforeach()
 
     file(REAL_PATH working_directory "${output_file}")
     file(RELATIVE_PATH output_file_relative_path "${CMAKE_BINARY_DIR}" "${output_file}")

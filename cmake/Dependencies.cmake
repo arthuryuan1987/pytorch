@@ -1360,30 +1360,13 @@ if(USE_XPU)
     set(SYCL_KERNEL_OPTIONS ${SYCL_KERNEL_OPTIONS} -D_GLIBCXX_USE_CXX11_ABI=1)
     set(SYCL_FLAGS ${SYCL_FLAGS} ${SYCL_KERNEL_OPTIONS})
 
-    # -- Link flags
-    include(ProcessorCount)
-    ProcessorCount(proc_cnt)
-    if ((DEFINED ENV{MAX_JOBS}) AND ("$ENV{MAX_JOBS}" LESS_EQUAL ${proc_cnt}))
-      set(SYCL_MAX_PARALLEL_LINK_JOBS $ENV{MAX_JOBS})
-    else()
-      set(SYCL_MAX_PARALLEL_LINK_JOBS ${proc_cnt})
-    endif()
-    set(SYCL_LINK_OPTIONS ${SYCL_LINK_OPTIONS} -fsycl-max-parallel-link-jobs=${SYCL_MAX_PARALLEL_LINK_JOBS})
-    set(SYCL_LINK_OPTIONS ${SYCL_LINK_OPTIONS} -fsycl-targets=spir64_gen,spir64)
-    set(SYCL_LINK_OPTIONS ${SYCL_LINK_OPTIONS} -flink-huge-device-code)
-    # SYCL_FLAGS: `-fsycl`, a kernel building flag setup by Intel SYCL compiler cmake.
-    set(SYCL_LINK_FLAGS ${SYCL_FLAGS} ${SYCL_LINK_OPTIONS})
-
-    # -- target compiler flags
-    # target compiler (Intel Graphics Compiler. IGC) of Intel SYCL compiler is to compile SPIRV and output kernel binary.
-    set(SYCL_ARCH_TARGET "-device pvc") # Only support AOT build for Intel Data Center Max GPU in PyTorch at current stage.
-    set(SYCL_TARGET_COMPILER_OPTIONS ${SYCL_TARGET_COMPILER_OPTIONS} "-options -cl-intel-enable-auto-large-GRF-mode")
-    set(SYCL_TARGET_COMPILER_OPTIONS ${SYCL_TARGET_COMPILER_OPTIONS} "-options -cl-poison-unsupported-fp64-kernels")
-    set(SYCL_TARGET_COMPILER_FLAGS ${SYCL_ARCH_TARGET} ${SYCL_TARGET_COMPILER_OPTIONS})
-
     if(BUILD_TEST)
       add_subdirectory(${PROJECT_SOURCE_DIR}/test/cpp/sycl ${CMAKE_BINARY_DIR}/test_sycl)
     endif()
+  else()
+    message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+      "Suppress this warning with -DUSE_XPU=OFF.")
+    caffe2_update_option(USE_XPU OFF)
   endif()
 endif()
 
