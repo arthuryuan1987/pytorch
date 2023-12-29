@@ -163,8 +163,10 @@ sycl_find_helper_file(run_sycl cmake)
 ##############################################################################
 # Separate the OPTIONS out from the sources
 ##############################################################################
-macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cpp_sources _cmake_options)
+macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cxx_sources _cmake_options)
   set( ${_cmake_options} )
+  set( ${_sycl_sources} )
+  set( ${_cxx_sources} )
   set( _found_options FALSE )
   set( _found_sycl_sources FALSE )
   set( _found_cpp_sources FALSE )
@@ -184,7 +186,7 @@ macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cpp_sources _cmake_options)
       set( _found_options FALSE )
       set( _found_sycl_sources TRUE )
       set( _found_cpp_sources FALSE )
-    elseif("x${arg}" STREQUAL "xCPP_SOURCES")
+    elseif("x${arg}" STREQUAL "xCXX_SOURCES")
       set( _found_options FALSE )
       set( _found_sycl_sources FALSE )
       set( _found_cpp_sources TRUE )
@@ -194,7 +196,7 @@ macro(SYCL_GET_SOURCES_AND_OPTIONS _sycl_sources _cpp_sources _cmake_options)
       elseif ( _found_sycl_sources )
         list(APPEND ${_sycl_sources} ${arg})
       elseif ( _found_cpp_sources )
-        list(APPEND ${_cpp_sources} ${arg})
+        list(APPEND ${_cxx_sources} ${arg})
       endif()
     endif()
   endforeach()
@@ -252,7 +254,7 @@ endfunction()
 # OUTPUT:
 #   generated_files     - List of generated files
 ##############################################################################
-macro(SYCL_WRAP_SRCS sycl_target generated_files _cmake_options sources)
+macro(SYCL_WRAP_SRCS sycl_target generated_files)
   # Optional arguments
   set(SYCL_flags "")
   set(SYCL_C_OR_CXX CXX)
@@ -262,6 +264,12 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files _cmake_options sources)
   list(APPEND SYCL_include_dirs "$<TARGET_PROPERTY:${sycl_target},INCLUDE_DIRECTORIES>")
 
   set(SYCL_compile_definitions "$<TARGET_PROPERTY:${sycl_target},COMPILE_DEFINITIONS>")
+
+  SYCL_GET_SOURCES_AND_OPTIONS(
+    _sycl_sources
+    _cxx_sources
+    _cmake_options
+    ${ARGN})
 
   set(_SYCL_build_shared_libs FALSE)
   list(FIND _cmake_options SHARED _SYCL_found_SHARED)
@@ -287,7 +295,7 @@ macro(SYCL_WRAP_SRCS sycl_target generated_files _cmake_options sources)
 
   # Reset the output variable
   set(_SYCL_wrap_generated_files "")
-  foreach(file ${sources})
+  foreach(file ${_sycl_sources})
     get_source_file_property(_is_header ${file} HEADER_FILE_ONLY)
     # SYCL kernels are in .cpp file
     if((${file} MATCHES "\\.cpp$") AND NOT _is_header)
@@ -566,47 +574,40 @@ macro(SYCL_ADD_LIBRARY sycl_target)
   # Separate the sources from the options
   SYCL_GET_SOURCES_AND_OPTIONS(
     _sycl_sources
-    _cpp_sources
+    _cxx_sources
     _cmake_options
     ${ARGN})
-
-  if(NOT "${_cmake_options}" STREQUAL "" AND NOT ${_cmake_options} MATCHES SHARED)
-    message(FATAL_ERROR "SYCL_ADD_LIBRARY supports SHARED library only.")
-  endif()
 
   # Compile sycl sources
   SYCL_WRAP_SRCS(
     ${sycl_target}
     ${sycl_target}_sycl_objects
-    SHARED
-    ${_sycl_sources})
-
-  # Compile cpp sources
-  set(${sycl_target}_cpp_objects_tgt)
-  if(_cpp_sources)
-    add_library(${sycl_target}_cpp_objects_tgt OBJECT ${_cpp_sources})
-    set_property(TARGET ${sycl_target}_cpp_objects_tgt PROPERTY POSITION_INDEPENDENT_CODE ON)
-  endif()
+    ${ARGN})
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
-  SYCL_COMPUTE_IMPORTED_OBJECT_FILE_NAME(link_file ${sycl_target} "lib" ".so")
+  SYCL_COMPUTE_DEVICE_OBJECT_FILE_NAME(device_object ${sycl_target})
 
-  # Add a custom linkage target
-  SYCL_LINK_OBJECTS(
-    ${imported_file}
+  # Add a custom linkage command to produce an imported executable file.
+  SYCL_LINK_DEVICE_OBJECTS(
+    ${device_object}
     ${sycl_target}
-    ${sycl_target}_shadow
-    SHARED
-    ${sycl_target}_cpp_objects_tgt
     ${${sycl_target}_sycl_objects})
 
   # Create library target.
-  add_library(${sycl_target} INTERFACE ${imported_file})
-  set_property(TARGET ${sycl_target} PROPERTY IMPORTED_LOCATION "${imported_file}")
-  set_property(TARGET ${sycl_target} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${imported_file})
+  add_library(
+    ${sycl_target}
+    ${_cmake_options}
+    ${_cxx_sources}
+    ${${sycl_target}_sycl_objects}
+    ${device_object})
 
-  sycl_target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
+  target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
+
+  set_target_properties(${sycl_target}
+    PROPERTIES
+    LINKER_LANGUAGE ${SYCL_C_OR_CXX}
+    )
 
 endmacro()
 
@@ -657,8 +658,7 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
   SYCL_WRAP_SRCS(
     ${sycl_target}
     ${sycl_target}_sycl_objects
-    _cmake_options
-    ${_sycl_sources})
+    ${ARGN})
 
   # Compute the file name of the intermedate link file used for separable
   # compilation.
@@ -678,4 +678,10 @@ macro(SYCL_ADD_EXECUTABLE sycl_target)
     ${device_object})
 
   target_link_libraries(${sycl_target} ${SYCL_LIBRARIES})
+
+  set_target_properties(${sycl_target}
+    PROPERTIES
+    LINKER_LANGUAGE ${SYCL_C_OR_CXX}
+    )
+
 endmacro()

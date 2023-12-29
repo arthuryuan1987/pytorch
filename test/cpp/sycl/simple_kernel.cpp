@@ -35,7 +35,7 @@ int enum_gpu_device(sycl::device& dev) {
 
 void itoa(float* res, int numel) {
   sycl::device dev;
-  if (!enum_gpu_device(dev)) {
+  if (enum_gpu_device(dev)) {
     return;
   }
   sycl::queue q = sycl::queue(dev, sycl::property_list());
