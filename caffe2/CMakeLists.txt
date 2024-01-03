@@ -86,6 +86,8 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
+  list(APPEND Caffe2_XPU_SYCL_SRCS ${ATen_XPU_SYCL_SRCS})
+  list(APPEND Caffe2_XPU_CPP_SRCS ${ATen_XPU_CPP_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
@@ -95,6 +97,7 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
+  list(APPEND Caffe2_XPU_INCLUDE ${ATen_XPU_INCLUDE})
   list(APPEND Caffe2_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
@@ -1061,6 +1064,18 @@ elseif(USE_CUDA)
   endif()
 endif()
 
+if(USE_XPU)
+  set(SYCL_LINK_LIBRARIES_KEYWORD PRIVATE)
+  sycl_add_library(
+    torch_xpu
+    SHARED
+    SYCL_SOURCES ${Caffe2_XPU_SYCL_SRCS}
+    CXX_SOURCES ${Caffe2_XPU_CPP_SRCS})
+  set(SYCL_LINK_LIBRARIES_KEYWORD)
+  torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
+  target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+endif()
+
 if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
@@ -1508,6 +1523,9 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
 endif()
+if(USE_XPU)
+  caffe2_interface_library(torch_xpu torch_xpu_library)
+endif()
 
 caffe2_interface_library(torch torch_library)
 
@@ -1518,6 +1536,9 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
+if(USE_XPU)
+  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+endif()
 install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 target_link_libraries(torch PUBLIC torch_cpu_library)
@@ -1526,6 +1547,9 @@ if(USE_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_library)
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
+endif()
+if(USE_XPU)
+  target_link_libraries(torch PUBLIC torch_xpu_library)
 endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)
@@ -1650,6 +1674,19 @@ if(USE_ROCM)
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
+endif()
+
+# ---[ Caffe2 XPU sources.
+if(USE_XPU)
+  get_directory_property(Caffe2_XPU_DEFINITIONS COMPILE_DEFINITIONS)
+  target_compile_definitions(torch_xpu PRIVATE ${Caffe2_XPU_DEFINITIONS})
+
+  # XXX
+  # target_link_libraries(torch_xpu PUBLIC c10_xpu)
+  target_link_libraries(torch_xpu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_XPU_DEPENDENCY_LIBS})
+
+  target_include_directories(torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
+  target_include_directories(torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
 if(BUILD_STATIC_RUNTIME_BENCHMARK)
